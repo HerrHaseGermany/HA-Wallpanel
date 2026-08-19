@@ -1,0 +1,15 @@
+{
+  "name": "home-assistant-ha-wallpanel",
+  "version": "0.7.13",
+  "private": true,
+  "type": "module",
+  "description": "Wallpanel integration with kiosk mode and a configurable Home Assistant screensaver",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "npm run build && node --test && python3 -m unittest discover -s test -p '*_test.py'",
+    "check": "npm test && git diff --exit-code -- custom_components/ha_wallpanel/frontend/ha-wallpanel.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,14 @@
+.DS_Store
+node_modules/
+npm-debug.log*
+*.log
+__pycache__/
+*.pyc
+.coverage
+htmlcov/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# The user's global Git ignore excludes this file; keep the repository rule.
+!.gitattributes

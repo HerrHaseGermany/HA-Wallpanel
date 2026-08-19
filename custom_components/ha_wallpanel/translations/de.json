@@ -1,0 +1,88 @@
+{
+  "title": "HA-Wallpanel",
+  "config": {
+    "step": {
+      "user": {
+        "title": "HA-Wallpanel einrichten",
+        "description": "Konfiguriert den globalen Bildschirmschoner. Mit ?kiosk am Ende einer Home-Assistant-URL werden Seitenleiste und Titelzeile ausgeblendet.",
+        "submit": "Speichern",
+        "data": {
+          "enabled": "Aktiviert",
+          "views": "Dashboards und Ansichten als Vollbild-Panels",
+          "cards": "Dashboard-Karten als Vollbild-Panels",
+          "colors": "Vollbild-Farben",
+          "panel_order": "Interne Panel-Reihenfolge",
+          "schedule_enabled": "Zeitplan aktiviert",
+          "schedule_start": "Zeitplan beginnt",
+          "schedule_end": "Normale Rotation ab",
+          "schedule_mode": "Im Zeitfenster",
+          "schedule_panel": "Statisches Panel",
+          "idle_time": "Inaktivitätszeit",
+          "display_time": "Rotationszeit je Panel",
+          "transition_time": "Überblendzeit",
+          "shuffle": "Zufallswiedergabe",
+          "show_progress": "Seitenindikator anzeigen",
+          "hide_cursor": "Mauszeiger ausblenden"
+        },
+        "data_description": {
+          "views": "Enthält eingebaute und benutzerdefinierte Dashboards sowie deren einzelne Lovelace-Ansichten.",
+          "cards": "Beim Hinzufügen öffnet sich der Home-Assistant-Kartenbrowser mit visueller Kartenauswahl und Karteneditor.",
+          "colors": "Über Hinzufügen öffnet sich direkt der Colorpicker. Gespeicherte Farben werden mit Vorschau und Hexwert angezeigt.",
+          "schedule_enabled": "Der tägliche Zeitraum darf über Mitternacht gehen. Außerhalb läuft wieder die normale Panel-Rotation."
+        }
+      }
+    },
+    "error": {
+      "invalid_cards": "Füge mindestens eine gültige Lovelace-Karte mit einem Typ hinzu.",
+      "invalid_colors": "Füge nur gültige Vollbild-Farben hinzu.",
+      "invalid_panels": "Wähle mindestens eine Ansicht, Karte oder Vollbild-Farbe.",
+      "invalid_transition": "Die Überblendzeit darf nicht länger als die Anzeigezeit sein.",
+      "invalid_schedule": "Prüfe Beginn, Ende und Betriebsart des Zeitplans.",
+      "invalid_value": "Mindestens ein Wert ist ungültig."
+    },
+    "abort": {
+      "single_instance_allowed": "HA-Wallpanel ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "HA-Wallpanel konfigurieren",
+        "description": "Screensaver-Änderungen werden sofort übertragen. Der Kioskmodus wird pro Gerät mit ?kiosk in der URL aktiviert.",
+        "submit": "Speichern",
+        "data": {
+          "enabled": "Aktiviert",
+          "views": "Dashboards und Ansichten als Vollbild-Panels",
+          "cards": "Dashboard-Karten als Vollbild-Panels",
+          "colors": "Vollbild-Farben",
+          "panel_order": "Interne Panel-Reihenfolge",
+          "schedule_enabled": "Zeitplan aktiviert",
+          "schedule_start": "Zeitplan beginnt",
+          "schedule_end": "Normale Rotation ab",
+          "schedule_mode": "Im Zeitfenster",
+          "schedule_panel": "Statisches Panel",
+          "idle_time": "Inaktivitätszeit",
+          "display_time": "Rotationszeit je Panel",
+          "transition_time": "Überblendzeit",
+          "shuffle": "Zufallswiedergabe",
+          "show_progress": "Seitenindikator anzeigen",
+          "hide_cursor": "Mauszeiger ausblenden"
+        },
+        "data_description": {
+          "views": "Enthält eingebaute und benutzerdefinierte Dashboards sowie deren einzelne Lovelace-Ansichten.",
+          "cards": "Beim Hinzufügen öffnet sich der Home-Assistant-Kartenbrowser mit visueller Kartenauswahl und Karteneditor.",
+          "colors": "Über Hinzufügen öffnet sich direkt der Colorpicker. Gespeicherte Farben werden mit Vorschau und Hexwert angezeigt.",
+          "schedule_enabled": "Der tägliche Zeitraum darf über Mitternacht gehen. Außerhalb läuft wieder die normale Panel-Rotation."
+        }
+      }
+    },
+    "error": {
+      "invalid_cards": "Füge mindestens eine gültige Lovelace-Karte mit einem Typ hinzu.",
+      "invalid_colors": "Füge nur gültige Vollbild-Farben hinzu.",
+      "invalid_panels": "Wähle mindestens eine Ansicht, Karte oder Vollbild-Farbe.",
+      "invalid_transition": "Die Überblendzeit darf nicht länger als die Anzeigezeit sein.",
+      "invalid_schedule": "Prüfe Beginn, Ende und Betriebsart des Zeitplans.",
+      "invalid_value": "Mindestens ein Wert ist ungültig."
+    }
+  }
+}

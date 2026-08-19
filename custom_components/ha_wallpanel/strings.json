@@ -1,0 +1,88 @@
+{
+  "title": "HA-Wallpanel",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up HA-Wallpanel",
+        "description": "Configure the global screensaver. Add ?kiosk to a Home Assistant URL to hide its sidebar and title bar.",
+        "submit": "Save",
+        "data": {
+          "enabled": "Enabled",
+          "views": "Fullscreen dashboards and views",
+          "cards": "Fullscreen dashboard card panels",
+          "colors": "Fullscreen colors",
+          "panel_order": "Internal panel order",
+          "schedule_enabled": "Schedule enabled",
+          "schedule_start": "Schedule starts",
+          "schedule_end": "Normal rotation resumes",
+          "schedule_mode": "During the scheduled time",
+          "schedule_panel": "Static panel",
+          "idle_time": "Idle time",
+          "display_time": "Rotation time per panel",
+          "transition_time": "Transition time",
+          "shuffle": "Shuffle playback",
+          "show_progress": "Show page indicator",
+          "hide_cursor": "Hide cursor"
+        },
+        "data_description": {
+          "views": "Includes built-in and user-created dashboards as well as their individual Lovelace views.",
+          "cards": "Adding a card opens Home Assistant's visual card browser and card editor.",
+          "colors": "Select Add to open the color picker. Saved colors show a preview and hexadecimal value.",
+          "schedule_enabled": "The daily time range may cross midnight. Normal panel rotation resumes outside it."
+        }
+      }
+    },
+    "error": {
+      "invalid_cards": "Add at least one valid Lovelace card with a type.",
+      "invalid_colors": "Add only valid fullscreen colors.",
+      "invalid_panels": "Select at least one view, card, or fullscreen color.",
+      "invalid_transition": "The transition time must not exceed the display time.",
+      "invalid_schedule": "Check the schedule start, end, and playback mode.",
+      "invalid_value": "One or more values are invalid."
+    },
+    "abort": {
+      "single_instance_allowed": "HA-Wallpanel is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configure HA-Wallpanel",
+        "description": "Screensaver changes are sent immediately. Kiosk mode is enabled per device by adding ?kiosk to the URL.",
+        "submit": "Save",
+        "data": {
+          "enabled": "Enabled",
+          "views": "Fullscreen dashboards and views",
+          "cards": "Fullscreen dashboard card panels",
+          "colors": "Fullscreen colors",
+          "panel_order": "Internal panel order",
+          "schedule_enabled": "Schedule enabled",
+          "schedule_start": "Schedule starts",
+          "schedule_end": "Normal rotation resumes",
+          "schedule_mode": "During the scheduled time",
+          "schedule_panel": "Static panel",
+          "idle_time": "Idle time",
+          "display_time": "Rotation time per panel",
+          "transition_time": "Transition time",
+          "shuffle": "Shuffle playback",
+          "show_progress": "Show page indicator",
+          "hide_cursor": "Hide cursor"
+        },
+        "data_description": {
+          "views": "Includes built-in and user-created dashboards as well as their individual Lovelace views.",
+          "cards": "Adding a card opens Home Assistant's visual card browser and card editor.",
+          "colors": "Select Add to open the color picker. Saved colors show a preview and hexadecimal value.",
+          "schedule_enabled": "The daily time range may cross midnight. Normal panel rotation resumes outside it."
+        }
+      }
+    },
+    "error": {
+      "invalid_cards": "Add at least one valid Lovelace card with a type.",
+      "invalid_colors": "Add only valid fullscreen colors.",
+      "invalid_panels": "Select at least one view, card, or fullscreen color.",
+      "invalid_transition": "The transition time must not exceed the display time.",
+      "invalid_schedule": "Check the schedule start, end, and playback mode.",
+      "invalid_value": "One or more values are invalid."
+    }
+  }
+}
