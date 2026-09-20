@@ -16,7 +16,7 @@ const {
 } = await import("../custom_components/ha_wallpanel/frontend/ha-wallpanel.js");
 
 test("build injects the package version", () => {
-  assert.equal(VERSION, "0.7.13");
+  assert.equal(VERSION, "0.7.21");
 });
 
 test("normalizes an integration configuration with defaults", () => {
@@ -35,11 +35,17 @@ test("normalizes an integration configuration with defaults", () => {
   assert.equal(config.schedule_start, "22:00");
   assert.equal(config.schedule_end, "06:00");
   assert.equal(config.schedule_mode, "black");
+  assert.equal(config.dashboard_brightness, 100);
+  assert.equal(config.screensaver_brightness, 100);
+  assert.equal(config.brightness_schedule_enabled, false);
+  assert.equal(config.brightness_schedule_dashboard, 30);
+  assert.equal(config.brightness_schedule_screensaver, 10);
   assert.equal(config.enabled, true);
   assert.equal(config.cards.length, 1);
   assert.deepEqual(config.cards[0], {
     name: "Karte 1",
     card: { type: "clock" },
+    scale: 100,
   });
   assert.equal(config.panels.length, 1);
   assert.equal("dashboard_paths" in config, false);
@@ -85,6 +91,7 @@ test("migrates a complete panel view to its single dashboard card", () => {
         type: "custom:wall-clock-card",
         widgets: [{ type: "clock", id: "clock" }],
       },
+      scale: 100,
     },
   ]);
 });
@@ -155,7 +162,7 @@ test("builds fullscreen view, card, and color panels", () => {
   assert.deepEqual(config.panels, [
     { kind: "view", path: "/dashboard-1/grundriss" },
     { kind: "view", path: "/lovelace/0" },
-    { kind: "card", name: "Uhr", card: { type: "clock" } },
+    { kind: "card", name: "Uhr", card: { type: "clock" }, scale: 100 },
     { kind: "color", color: "#0C2238" },
     { kind: "color", color: "#000000" },
   ]);
@@ -179,9 +186,179 @@ test("applies the shared panel order across all panel types", () => {
   assert.deepEqual(config.panels, [
     { kind: "color", color: "#123456" },
     { kind: "view", path: "/dashboard/one" },
-    { kind: "card", name: "Uhr", card: { type: "clock" } },
+    { kind: "card", name: "Uhr", card: { type: "clock" }, scale: 100 },
   ]);
   assert.equal(config.shuffle, true);
+});
+
+test("dashboard cards keep an independent fullscreen scale", () => {
+  const config = normalizeConfig({
+    configured: true,
+    enabled: true,
+    cards: [
+      { name: "Wetteruhr", card: { type: "custom:clock-weather-card" }, scale: 200 },
+    ],
+  });
+
+  assert.equal(config.cards[0].scale, 200);
+  assert.equal(config.panels[0].scale, 200);
+  assert.throws(
+    () =>
+      normalizeConfig({
+        configured: true,
+        cards: [{ card: { type: "clock" }, scale: 325 }],
+      }),
+    /zwischen 50 und 300 Prozent/,
+  );
+});
+
+test("panel action buttons always render as icon-only controls", () => {
+  const originalDocument = globalThis.document;
+  let clickListener;
+  const icon = {
+    className: "",
+    attributes: {},
+    setAttribute(name, value) {
+      this.attributes[name] = value;
+    },
+  };
+  const button = {
+    className: "",
+    title: "",
+    attributes: {},
+    children: [],
+    setAttribute(name, value) {
+      this.attributes[name] = value;
+    },
+    append(...children) {
+      this.children.push(...children);
+    },
+    addEventListener(name, listener) {
+      if (name === "click") clickListener = listener;
+    },
+  };
+  globalThis.document = {
+    createElement: (name) => (name === "ha-icon" ? icon : button),
+  };
+
+  try {
+    let invoked = 0;
+    const controller = new WallpanelSettingsController();
+    const result = controller._createPanelIconButton(
+      "mdi:pencil",
+      "Bearbeiten",
+      () => (invoked += 1),
+    );
+    assert.equal(result, button);
+    assert.deepEqual(button.children, [icon]);
+    assert.equal(button.textContent, undefined);
+    assert.equal(button.attributes["aria-label"], "Bearbeiten");
+    assert.equal(button.attributes.appearance, "plain");
+    assert.equal(icon.attributes.icon, "mdi:pencil");
+
+    let prevented = 0;
+    let stopped = 0;
+    clickListener({
+      preventDefault: () => (prevented += 1),
+      stopPropagation: () => (stopped += 1),
+    });
+    assert.equal(invoked, 1);
+    assert.equal(prevented, 1);
+    assert.equal(stopped, 1);
+  } finally {
+    if (originalDocument === undefined) delete globalThis.document;
+    else globalThis.document = originalDocument;
+  }
+});
+
+test("card scale dialog applies its slider value", () => {
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  const elements = [];
+  const createElement = (name) => {
+    const listeners = new Map();
+    const element = {
+      localName: name,
+      style: {},
+      attributes: {},
+      children: [],
+      open: false,
+      setAttribute(key, value) {
+        this.attributes[key] = value;
+      },
+      append(...children) {
+        this.children.push(...children);
+      },
+      appendChild(child) {
+        this.children.push(child);
+        return child;
+      },
+      addEventListener(type, listener) {
+        listeners.set(type, listener);
+      },
+      removeEventListener(type) {
+        listeners.delete(type);
+      },
+      emit(type, event = {}) {
+        listeners.get(type)?.(event);
+      },
+      showModal() {
+        this.open = true;
+      },
+      close() {
+        this.open = false;
+      },
+      focus() {},
+      remove() {
+        this.removed = true;
+      },
+    };
+    elements.push(element);
+    return element;
+  };
+  const body = createElement("body");
+  globalThis.document = { body, createElement };
+  globalThis.window = { requestAnimationFrame: (callback) => callback() };
+
+  try {
+    let changed;
+    const editor = {
+      _wallpanelRenderKey: "old",
+      _wallpanelState: {
+        cards: [
+          {
+            name: "Wetteruhr",
+            card: { type: "custom:clock-weather-card" },
+            scale: 100,
+          },
+        ],
+        cardSelector: {
+          dispatchEvent: (event) => (changed = event.detail.value),
+        },
+      },
+    };
+    const controller = new WallpanelSettingsController();
+    controller._renderPanelEditor = () => {};
+    controller._openCardScaleDialog(editor, 0);
+
+    const range = elements.find((element) => element.localName === "input");
+    const save = elements.find(
+      (element) =>
+        element.localName === "ha-button" && element.textContent === "Übernehmen",
+    );
+    assert.equal(range.value, "100");
+    range.value = "225";
+    save.emit("click", { preventDefault() {}, stopPropagation() {} });
+
+    assert.equal(changed[0].scale, 225);
+    assert.equal(controller._activeCardScaleDialog, undefined);
+    assert.equal(editor._wallpanelRenderKey, undefined);
+  } finally {
+    if (originalDocument === undefined) delete globalThis.document;
+    else globalThis.document = originalDocument;
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
 });
 
 test("shuffle selects a different next panel", () => {
@@ -259,6 +436,83 @@ test("schedule changes preserve an existing idle countdown", () => {
   assert.equal(rearmed, 0);
 });
 
+test("brightness schedule selects separate dashboard and screensaver levels", () => {
+  const controller = new ScreensaverController();
+  controller._hass = { config: { time_zone: "UTC" } };
+  controller._config = normalizeConfig({
+    configured: true,
+    enabled: true,
+    views: ["/dashboard/one"],
+    dashboard_brightness: 90,
+    screensaver_brightness: 70,
+    brightness_schedule_enabled: true,
+    brightness_schedule_start: "22:00",
+    brightness_schedule_end: "06:00",
+    brightness_schedule_dashboard: 35,
+    brightness_schedule_screensaver: 10,
+  });
+
+  assert.deepEqual(
+    controller._brightnessLevels(new Date("2026-08-19T23:00:00Z")),
+    { scheduled: true, dashboard: 35, screensaver: 10 },
+  );
+  assert.deepEqual(
+    controller._brightnessLevels(new Date("2026-08-19T12:00:00Z")),
+    { scheduled: false, dashboard: 90, screensaver: 70 },
+  );
+});
+
+test("brightness overlays dim without intercepting the wallpanel", () => {
+  const values = new Map();
+  const screenValues = new Map();
+  const controller = new ScreensaverController();
+  controller._connected = true;
+  controller._hass = { config: { time_zone: "UTC" } };
+  controller._config = normalizeConfig({
+    configured: true,
+    enabled: true,
+    views: ["/dashboard/one"],
+    brightness_schedule_enabled: true,
+    brightness_schedule_start: "22:00",
+    brightness_schedule_end: "06:00",
+    brightness_schedule_dashboard: 30,
+    brightness_schedule_screensaver: 10,
+  });
+  controller._brightnessOverlay = {
+    hidden: true,
+    style: { setProperty: (name, value) => values.set(name, value) },
+  };
+  controller._overlayHost = {
+    style: { setProperty: (name, value) => screenValues.set(name, value) },
+  };
+  globalThis.location = { search: "?kiosk" };
+
+  try {
+    controller._syncBrightness(new Date("2026-08-19T23:00:00Z"));
+    assert.equal(controller._brightnessOverlay.hidden, false);
+    assert.equal(values.get("--dashboard-dim-opacity"), "0.7");
+    assert.equal(screenValues.get("--screensaver-dim-opacity"), "0.9");
+
+    controller._active = true;
+    controller._syncBrightness(new Date("2026-08-19T23:00:00Z"));
+    assert.equal(controller._brightnessOverlay.hidden, true);
+  } finally {
+    delete globalThis.location;
+  }
+});
+
+test("rejects brightness values outside the percentage range", () => {
+  assert.throws(
+    () =>
+      normalizeConfig({
+        configured: true,
+        views: ["/dashboard/one"],
+        dashboard_brightness: 101,
+      }),
+    /höchstens 100/,
+  );
+});
+
 test("rejects card entries without a type", () => {
   assert.throws(
     () => normalizeConfig({ configured: true, cards: [{ entity: "sun.sun" }] }),
@@ -292,11 +546,36 @@ test("mouse movement immediately dismisses an active screensaver", () => {
   assert.deepEqual(dismissed, [true]);
 });
 
-test("global wheel activity tracking stays passive", () => {
-  let wheelOptions;
+test("screensaver closes Home Assistant more-info dialogs before activation", () => {
+  const originalDocument = globalThis.document;
+  let closed = 0;
+  const dialog = { closeDialog: () => (closed += 1) };
+  const shadowRoot = {
+    querySelectorAll: (selector) =>
+      selector === "ha-more-info-dialog" ? [dialog] : [],
+  };
+  globalThis.document = {
+    querySelectorAll: (selector) =>
+      selector === "*" ? [{ shadowRoot }] : [],
+  };
+
+  try {
+    const controller = new ScreensaverController();
+    assert.equal(controller._closeMoreInfoDialogs(), 1);
+    assert.equal(closed, 1);
+  } finally {
+    if (originalDocument === undefined) delete globalThis.document;
+    else globalThis.document = originalDocument;
+  }
+});
+
+test("idle tracking stays off the global wheel event path", () => {
+  let wheelRegistered = false;
+  let scrollOptions;
   globalThis.window = {
     addEventListener: (name, _listener, options) => {
-      if (name === "wheel") wheelOptions = options;
+      if (name === "wheel") wheelRegistered = true;
+      if (name === "scroll") scrollOptions = options;
     },
     removeEventListener() {},
   };
@@ -308,14 +587,15 @@ test("global wheel activity tracking stays passive", () => {
   try {
     const controller = new ScreensaverController();
     controller._addActivityListeners();
-    assert.deepEqual(wheelOptions, { capture: true, passive: true });
+    assert.equal(wheelRegistered, false);
+    assert.deepEqual(scrollOptions, { capture: true, passive: true });
   } finally {
     delete globalThis.window;
     delete globalThis.document;
   }
 });
 
-test("active screensaver delegates wheel cancellation to its overlay", () => {
+test("active screensaver ignores background scroll and handles wheel on its overlay", () => {
   const controller = new ScreensaverController();
   controller._active = true;
   let deactivated = false;
@@ -323,7 +603,7 @@ test("active screensaver delegates wheel cancellation to its overlay", () => {
     deactivated = true;
   };
 
-  controller._onWindowActivity({ type: "wheel" });
+  controller._onWindowActivity({ type: "scroll" });
   assert.equal(deactivated, false);
 
   controller._overlayHost = { hidden: false };
@@ -367,6 +647,66 @@ test("screensaver dismissal hides and clears the overlay synchronously", () => {
   assert.equal(cleared, true);
   assert.equal(activeEvent, false);
   assert.equal(rearmed, true);
+});
+
+test("active screensaver locks and restores page scrolling", () => {
+  class FakeStyle {
+    constructor(initial = {}) {
+      this.values = new Map(Object.entries(initial));
+      this.priorities = new Map();
+    }
+
+    getPropertyValue(property) {
+      return this.values.get(property) || "";
+    }
+
+    getPropertyPriority(property) {
+      return this.priorities.get(property) || "";
+    }
+
+    setProperty(property, value, priority = "") {
+      this.values.set(property, value);
+      this.priorities.set(property, priority);
+    }
+
+    removeProperty(property) {
+      this.values.delete(property);
+      this.priorities.delete(property);
+    }
+  }
+
+  const documentElement = { style: new FakeStyle({ overflow: "auto" }) };
+  const body = { style: new FakeStyle() };
+  let appendedStyle;
+  let styleRemoved = false;
+  globalThis.document = {
+    documentElement,
+    body,
+    head: { appendChild: (style) => (appendedStyle = style) },
+    createElement: () => ({
+      setAttribute() {},
+      textContent: "",
+      remove: () => (styleRemoved = true),
+    }),
+  };
+
+  try {
+    const controller = new ScreensaverController();
+    controller._lockPageScroll();
+
+    assert.equal(documentElement.style.getPropertyValue("overflow"), "hidden");
+    assert.equal(documentElement.style.getPropertyPriority("overflow"), "important");
+    assert.equal(body.style.getPropertyValue("overflow"), "hidden");
+    assert.match(appendedStyle.textContent, /html::\-webkit-scrollbar/);
+
+    controller._unlockPageScroll();
+
+    assert.equal(documentElement.style.getPropertyValue("overflow"), "auto");
+    assert.equal(body.style.getPropertyValue("overflow"), "");
+    assert.equal(styleRemoved, true);
+  } finally {
+    delete globalThis.document;
+  }
 });
 
 test("hidden cursor is enforced through nested card shadow roots", () => {
@@ -445,6 +785,47 @@ test("wallpanel settings force wheel scrolling inside the options dialog", () =>
     dialog.style.getPropertyValue("--ha-dialog-max-height"),
     "calc(100dvh - 24px)",
   );
+
+  body.scrollTop = 120;
+  prevented = false;
+  wheelListener({
+    defaultPrevented: false,
+    ctrlKey: false,
+    deltaX: 0,
+    deltaY: 120,
+    deltaMode: 0,
+    composedPath: () => [{ localName: "hui-card-picker" }, body],
+    preventDefault: () => (prevented = true),
+    stopPropagation: () => {},
+  });
+
+  assert.equal(body.scrollTop, 120);
+  assert.equal(prevented, false);
+});
+
+test("wallpanel settings reuse the active options flow", () => {
+  const shadowRoot = {
+    querySelector: () => undefined,
+    querySelectorAll: () => [],
+  };
+  const flow = { isConnected: true, shadowRoot };
+  const controller = new WallpanelSettingsController();
+  controller._activeFlow = flow;
+  controller._enableAutoClose = () => {};
+  controller._setupPanelEditor = () => {};
+  controller._compactTimeFields = () => {};
+  globalThis.document = {
+    querySelectorAll: () => {
+      throw new Error("The complete Home Assistant DOM must not be rescanned");
+    },
+  };
+
+  try {
+    controller.sync();
+    assert.equal(controller._activeFlow, flow);
+  } finally {
+    delete globalThis.document;
+  }
 });
 
 test("wallpanel settings recognize options flows whose handler is an entry id", () => {
@@ -460,6 +841,13 @@ test("wallpanel settings recognize options flows whose handler is an entry id", 
     "schedule_end",
     "schedule_mode",
     "schedule_panel",
+    "dashboard_brightness",
+    "screensaver_brightness",
+    "brightness_schedule_enabled",
+    "brightness_schedule_start",
+    "brightness_schedule_end",
+    "brightness_schedule_dashboard",
+    "brightness_schedule_screensaver",
     "idle_time",
     "display_time",
     "transition_time",
@@ -528,7 +916,7 @@ test("native card browser result is appended to the cards selector", () => {
   assert.equal(event.type, "value-changed");
   assert.deepEqual(event.detail.value, [
     { name: "Vorhanden", card: { type: "tile" } },
-    { name: "Uhr", card: { type: "clock" } },
+    { name: "Uhr", card: { type: "clock" }, scale: 100 },
   ]);
 });
 
@@ -550,6 +938,7 @@ test("native card browser unwraps a complete panel view", () => {
     {
       name: "wall-clock-card",
       card: { type: "custom:wall-clock-card" },
+      scale: 100,
     },
   ]);
 });
@@ -592,6 +981,116 @@ test("dashboard cards receive Home Assistant's panel layout context", async () =
   } finally {
     if (originalDocument === undefined) delete globalThis.document;
     else globalThis.document = originalDocument;
+    if (originalCustomElements === undefined) delete globalThis.customElements;
+    else globalThis.customElements = originalCustomElements;
+  }
+});
+
+test("dashboard card scaling is applied around the panel center", () => {
+  const controller = new ScreensaverController();
+  const frameStyles = new Map();
+  const cardStyles = new Map();
+  const card = {
+    style: { setProperty: (name, value) => cardStyles.set(name, value) },
+    addEventListener: () => undefined,
+  };
+  const frame = {
+    style: { setProperty: (name, value) => frameStyles.set(name, value) },
+    replaceChildren: (value) => assert.equal(value, card),
+  };
+  const slide = {};
+
+  controller._mountCard(frame, slide, card, { type: "clock" }, 200, 1);
+
+  assert.equal(frameStyles.get("align-items"), "center");
+  assert.equal(frameStyles.get("justify-content"), "center");
+  assert.equal(cardStyles.get("width"), "50%");
+  assert.equal(cardStyles.get("height"), "50%");
+  assert.equal(cardStyles.get("transform"), "scale(2)");
+  assert.equal(cardStyles.get("transform-origin"), "center center");
+});
+
+test("screensaver loads Lovelace resources for custom cards on built-in panels", async () => {
+  const originalDocument = globalThis.document;
+  const originalCustomElements = globalThis.customElements;
+  const registry = new Map([["hui-card", class {}]]);
+  const wrapper = {
+    style: { setProperty: () => undefined },
+    load: () => undefined,
+  };
+  globalThis.document = {
+    createElement: (name) => {
+      assert.equal(name, "hui-card");
+      return wrapper;
+    },
+  };
+  globalThis.customElements = {
+    get: (name) => registry.get(name),
+  };
+
+  try {
+    const controller = new ScreensaverController();
+    const messages = [];
+    controller._hass = {
+      auth: { data: { hassUrl: "http://homeassistant.local" } },
+      connection: {
+        sendMessagePromise: async (message) => {
+          messages.push(message);
+          return [
+            {
+              type: "module",
+              url: "/hacsfiles/removed-card/removed-card.js",
+            },
+            {
+              type: "module",
+              url: "/hacsfiles/clock-weather-card/clock-weather-card.js",
+            },
+          ];
+        },
+      },
+    };
+    const loadedResources = [];
+    controller._loadLovelaceResource = async (resource) => {
+      loadedResources.push(resource.url);
+      assert.equal(
+        resource.url,
+        "/hacsfiles/clock-weather-card/clock-weather-card.js",
+      );
+      registry.set("clock-weather-card", class {});
+    };
+
+    const card = await controller._instantiateCard({
+      type: "custom:clock-weather-card",
+      entity: "weather.forecast_home",
+    });
+
+    assert.equal(card, wrapper);
+    assert.deepEqual(messages, [{ type: "lovelace/resources" }]);
+    assert.deepEqual(loadedResources, [
+      "/hacsfiles/clock-weather-card/clock-weather-card.js",
+    ]);
+    assert.equal(Boolean(registry.get("clock-weather-card")), true);
+  } finally {
+    if (originalDocument === undefined) delete globalThis.document;
+    else globalThis.document = originalDocument;
+    if (originalCustomElements === undefined) delete globalThis.customElements;
+    else globalThis.customElements = originalCustomElements;
+  }
+});
+
+test("screensaver reports a readable error for an unavailable custom card", async () => {
+  const originalCustomElements = globalThis.customElements;
+  globalThis.customElements = { get: () => undefined };
+
+  try {
+    const controller = new ScreensaverController();
+    controller._ensureLovelaceResources = async () => undefined;
+
+    await assert.rejects(
+      controller._instantiateCard({ type: "custom:missing-card" }),
+      /Custom Card missing-card ist nicht geladen/,
+    );
+  } finally {
     if (originalCustomElements === undefined) delete globalThis.customElements;
     else globalThis.customElements = originalCustomElements;
   }
@@ -719,9 +1218,47 @@ test("visual card editor replaces the stored card configuration", () => {
     {
       name: "Wettervorhersage",
       card: { type: "weather-forecast", entity: "weather.home" },
+      scale: 100,
     },
   ]);
   assert.equal(editor._wallpanelRenderKey, undefined);
+});
+
+test("native card editor launches its temporary view in edit mode", async () => {
+  const controller = new WallpanelSettingsController();
+  let receivedEditMode;
+  let dispatchedEvent;
+  let removed = 0;
+  const hass = {};
+  const editor = {
+    _wallpanelState: {
+      cards: [{ name: "Uhr", card: { type: "clock" }, scale: 150 }],
+      cardSelector: { hass },
+    },
+  };
+  controller._prepareCardBrowserContext = async () => undefined;
+  controller._createCardBrowserHass = (value) => value;
+  controller._createTemporaryCardView = async (
+    receivedHass,
+    cards,
+    _saveConfig,
+    editMode,
+  ) => {
+    assert.equal(receivedHass, hass);
+    assert.deepEqual(cards, [{ type: "clock" }]);
+    receivedEditMode = editMode;
+    return {
+      element: { dispatchEvent: (event) => (dispatchedEvent = event) },
+      temporaryHost: { remove: () => (removed += 1) },
+    };
+  };
+
+  await controller._openNativeCardEditor(editor, 0);
+
+  assert.equal(receivedEditMode, true);
+  assert.equal(dispatchedEvent.type, "ll-edit-card");
+  assert.deepEqual(dispatchedEvent.detail.path, [0, 0]);
+  assert.equal(removed, 1);
 });
 
 test("dashboard designer is offered only for explicitly compatible cards", () => {
@@ -973,6 +1510,61 @@ test("keeps the embedded marker when a dashboard redirect drops its query", () =
     );
   } finally {
     delete globalThis.window;
+    delete globalThis.document;
+    delete globalThis.location;
+  }
+});
+
+test("kiosk mode recognizes Home Assistant's built-in overview dashboard", () => {
+  const menuButton = {};
+  const toolbar = {};
+  const view = {};
+  const huiRootShadow = {
+    querySelector: (selector) =>
+      ({
+        "ha-menu-button": menuButton,
+        "app-toolbar": toolbar,
+        "#view": view,
+      })[selector],
+  };
+  const huiRoot = { shadowRoot: huiRootShadow };
+  const panelRoot = {
+    querySelector: (selector) => (selector === "hui-root" ? huiRoot : undefined),
+  };
+  const homePanel = {
+    localName: "ha-panel-home",
+    shadowRoot: panelRoot,
+  };
+  const resolver = { lastElementChild: homePanel };
+  const sidebar = {};
+  const main = {
+    shadowRoot: {
+      querySelector: (selector) =>
+        ({
+          "partial-panel-resolver": resolver,
+          "ha-sidebar": sidebar,
+        })[selector],
+    },
+  };
+  const homeAssistant = {
+    hass: { panels: { home: { component_name: "home" } } },
+    shadowRoot: {
+      querySelector: (selector) =>
+        selector === "home-assistant-main" ? main : undefined,
+    },
+  };
+  globalThis.location = { pathname: "/home" };
+  globalThis.document = { querySelector: () => homeAssistant };
+
+  try {
+    const elements = new KioskModeController()._findHomeAssistantElements();
+
+    assert.equal(elements.sidebar, sidebar);
+    assert.equal(elements.menuButton, menuButton);
+    assert.equal(elements.toolbar, toolbar);
+    assert.equal(elements.view, view);
+    assert.deepEqual(elements.styleRoots, [document, panelRoot, huiRootShadow]);
+  } finally {
     delete globalThis.document;
     delete globalThis.location;
   }

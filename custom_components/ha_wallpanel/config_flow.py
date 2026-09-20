@@ -21,8 +21,14 @@ from homeassistant.helpers import selector
 
 from .config import ConfigValidationError, normalize_config
 from .const import (
+    CONF_BRIGHTNESS_SCHEDULE_DASHBOARD,
+    CONF_BRIGHTNESS_SCHEDULE_ENABLED,
+    CONF_BRIGHTNESS_SCHEDULE_END,
+    CONF_BRIGHTNESS_SCHEDULE_SCREENSAVER,
+    CONF_BRIGHTNESS_SCHEDULE_START,
     CONF_CARDS,
     CONF_COLORS,
+    CONF_DASHBOARD_BRIGHTNESS,
     CONF_DISPLAY_TIME,
     CONF_ENABLED,
     CONF_HIDE_CURSOR,
@@ -33,6 +39,7 @@ from .const import (
     CONF_SCHEDULE_MODE,
     CONF_SCHEDULE_PANEL,
     CONF_SCHEDULE_START,
+    CONF_SCREENSAVER_BRIGHTNESS,
     CONF_SHOW_PROGRESS,
     CONF_SHUFFLE,
     CONF_TRANSITION_TIME,
@@ -76,6 +83,19 @@ def _number_selector(
             step=step,
             mode=selector.NumberSelectorMode.BOX,
             unit_of_measurement="s",
+        )
+    )
+
+
+def _percent_selector() -> selector.NumberSelector:
+    """Create a brightness percentage slider."""
+    return selector.NumberSelector(
+        selector.NumberSelectorConfig(
+            min=0,
+            max=100,
+            step=1,
+            mode=selector.NumberSelectorMode.SLIDER,
+            unit_of_measurement="%",
         )
     )
 
@@ -221,6 +241,19 @@ def _config_schema(
                             "required": True,
                             "selector": selector.ObjectSelector(),
                         },
+                        "scale": {
+                            "label": "Skalierung (%)",
+                            "required": True,
+                            "selector": selector.NumberSelector(
+                                selector.NumberSelectorConfig(
+                                    min=50,
+                                    max=300,
+                                    step=25,
+                                    mode=selector.NumberSelectorMode.SLIDER,
+                                    unit_of_measurement="%",
+                                )
+                            ),
+                        },
                     },
                 )
             ),
@@ -298,6 +331,34 @@ def _config_schema(
             vol.Required(
                 CONF_SCHEDULE_PANEL, default=values[CONF_SCHEDULE_PANEL]
             ): selector.TextSelector(),
+            vol.Required(
+                CONF_DASHBOARD_BRIGHTNESS,
+                default=values[CONF_DASHBOARD_BRIGHTNESS],
+            ): _percent_selector(),
+            vol.Required(
+                CONF_SCREENSAVER_BRIGHTNESS,
+                default=values[CONF_SCREENSAVER_BRIGHTNESS],
+            ): _percent_selector(),
+            vol.Required(
+                CONF_BRIGHTNESS_SCHEDULE_ENABLED,
+                default=values[CONF_BRIGHTNESS_SCHEDULE_ENABLED],
+            ): selector.BooleanSelector(),
+            vol.Required(
+                CONF_BRIGHTNESS_SCHEDULE_START,
+                default=values[CONF_BRIGHTNESS_SCHEDULE_START],
+            ): selector.TimeSelector(),
+            vol.Required(
+                CONF_BRIGHTNESS_SCHEDULE_END,
+                default=values[CONF_BRIGHTNESS_SCHEDULE_END],
+            ): selector.TimeSelector(),
+            vol.Required(
+                CONF_BRIGHTNESS_SCHEDULE_DASHBOARD,
+                default=values[CONF_BRIGHTNESS_SCHEDULE_DASHBOARD],
+            ): _percent_selector(),
+            vol.Required(
+                CONF_BRIGHTNESS_SCHEDULE_SCREENSAVER,
+                default=values[CONF_BRIGHTNESS_SCHEDULE_SCREENSAVER],
+            ): _percent_selector(),
         }
     )
 

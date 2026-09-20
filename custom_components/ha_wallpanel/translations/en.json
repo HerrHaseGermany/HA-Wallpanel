@@ -12,6 +12,13 @@
           "cards": "Fullscreen dashboard card panels",
           "colors": "Fullscreen colors",
           "panel_order": "Internal panel order",
+          "dashboard_brightness": "Dashboard brightness",
+          "screensaver_brightness": "Screensaver brightness",
+          "brightness_schedule_enabled": "Enable brightness schedule",
+          "brightness_schedule_start": "Dimmed brightness starts",
+          "brightness_schedule_end": "Normal brightness resumes",
+          "brightness_schedule_dashboard": "Dashboard brightness during schedule",
+          "brightness_schedule_screensaver": "Screensaver brightness during schedule",
           "schedule_enabled": "Schedule enabled",
           "schedule_start": "Schedule starts",
           "schedule_end": "Normal rotation resumes",
@@ -28,6 +35,9 @@
           "views": "Includes built-in and user-created dashboards as well as their individual Lovelace views.",
           "cards": "Adding a card opens Home Assistant's visual card browser and card editor.",
           "colors": "Select Add to open the color picker. Saved colors show a preview and hexadecimal value.",
+          "dashboard_brightness": "100% leaves the dashboard unchanged; 0% fades it completely to black.",
+          "screensaver_brightness": "Applied to every screensaver panel independently of the dashboard.",
+          "brightness_schedule_enabled": "Optional daily period with separate brightness levels; it may cross midnight.",
           "schedule_enabled": "The daily time range may cross midnight. Normal panel rotation resumes outside it."
         }
       }
@@ -38,6 +48,7 @@
       "invalid_panels": "Select at least one view, card, or fullscreen color.",
       "invalid_transition": "The transition time must not exceed the display time.",
       "invalid_schedule": "Check the schedule start, end, and playback mode.",
+      "invalid_brightness": "Brightness must be between 0 and 100%, and the scheduled times must differ.",
       "invalid_value": "One or more values are invalid."
     },
     "abort": {
@@ -56,6 +67,13 @@
           "cards": "Fullscreen dashboard card panels",
           "colors": "Fullscreen colors",
           "panel_order": "Internal panel order",
+          "dashboard_brightness": "Dashboard brightness",
+          "screensaver_brightness": "Screensaver brightness",
+          "brightness_schedule_enabled": "Enable brightness schedule",
+          "brightness_schedule_start": "Dimmed brightness starts",
+          "brightness_schedule_end": "Normal brightness resumes",
+          "brightness_schedule_dashboard": "Dashboard brightness during schedule",
+          "brightness_schedule_screensaver": "Screensaver brightness during schedule",
           "schedule_enabled": "Schedule enabled",
           "schedule_start": "Schedule starts",
           "schedule_end": "Normal rotation resumes",
@@ -72,6 +90,9 @@
           "views": "Includes built-in and user-created dashboards as well as their individual Lovelace views.",
           "cards": "Adding a card opens Home Assistant's visual card browser and card editor.",
           "colors": "Select Add to open the color picker. Saved colors show a preview and hexadecimal value.",
+          "dashboard_brightness": "100% leaves the dashboard unchanged; 0% fades it completely to black.",
+          "screensaver_brightness": "Applied to every screensaver panel independently of the dashboard.",
+          "brightness_schedule_enabled": "Optional daily period with separate brightness levels; it may cross midnight.",
           "schedule_enabled": "The daily time range may cross midnight. Normal panel rotation resumes outside it."
         }
       }
@@ -82,6 +103,7 @@
       "invalid_panels": "Select at least one view, card, or fullscreen color.",
       "invalid_transition": "The transition time must not exceed the display time.",
       "invalid_schedule": "Check the schedule start, end, and playback mode.",
+      "invalid_brightness": "Brightness must be between 0 and 100%, and the scheduled times must differ.",
       "invalid_value": "One or more values are invalid."
     }
   }

@@ -1,6 +1,6 @@
 {
   "name": "home-assistant-ha-wallpanel",
-  "version": "0.7.13",
+  "version": "0.7.21",
   "private": true,
   "type": "module",
   "description": "Wallpanel integration with kiosk mode and a configurable Home Assistant screensaver",

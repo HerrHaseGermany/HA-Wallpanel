@@ -1,10 +1,21 @@
-/* HA-Wallpanel v0.7.13 */
-export const VERSION = "0.7.13";
+/* HA-Wallpanel v0.7.21 */
+export const VERSION = "0.7.21";
 
 const EVENT_NAME = "ha-wallpanel-screensaver-active-changed";
 const WS_TYPE_SUBSCRIBE = "ha_wallpanel/subscribe";
 const DOMAIN = "ha_wallpanel";
 const KIOSK_SCROLLBAR_STYLE_ATTRIBUTE = "data-ha-wallpanel-scrollbars";
+const SCREENSAVER_SCROLL_LOCK_STYLE_ATTRIBUTE =
+  "data-ha-wallpanel-screensaver-scroll-lock";
+const DASHBOARD_PANEL_COMPONENTS = new Set([
+  "lovelace",
+  "home",
+  "light",
+  "security",
+  "climate",
+  "energy",
+  "maintenance",
+]);
 
 // Home Assistant does not currently expose a capability flag for cards whose
 // visual designer lives directly in dashboard edit mode. Keep the compatibility
@@ -62,6 +73,13 @@ export const DEFAULT_CONFIG = Object.freeze({
   schedule_end: "06:00",
   schedule_mode: "black",
   schedule_panel: "",
+  dashboard_brightness: 100,
+  screensaver_brightness: 100,
+  brightness_schedule_enabled: false,
+  brightness_schedule_start: "22:00",
+  brightness_schedule_end: "06:00",
+  brightness_schedule_dashboard: 30,
+  brightness_schedule_screensaver: 10,
   show_progress: false,
   hide_cursor: true,
   cards: [],
@@ -71,6 +89,14 @@ function numberOption(value, fallback, name, minimum) {
   const parsed = value === undefined ? fallback : Number(value);
   if (!Number.isFinite(parsed) || parsed < minimum) {
     throw new Error(`${name} muss mindestens ${minimum} sein.`);
+  }
+  return parsed;
+}
+
+function brightnessOption(value, fallback, name) {
+  const parsed = numberOption(value, fallback, name, 0);
+  if (parsed > 100) {
+    throw new Error(`${name} darf höchstens 100 sein.`);
   }
   return parsed;
 }
@@ -146,6 +172,16 @@ function fullscreenCardConfig(value, index) {
   return { ...card };
 }
 
+function cardScale(value, index) {
+  const parsed = value === undefined ? 100 : Number(value);
+  if (!Number.isFinite(parsed) || parsed < 50 || parsed > 300) {
+    throw new Error(
+      `Die Skalierung der Screensaver-Karte ${index + 1} muss zwischen 50 und 300 Prozent liegen.`,
+    );
+  }
+  return Math.round(parsed);
+}
+
 function timeOption(value, fallback, name) {
   const candidate = String(value === undefined ? fallback : value).trim();
   if (!/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(candidate)) {
@@ -202,9 +238,9 @@ function orderedPanels(value, views, cards, colors) {
 
   const catalog = new Map([
     ...views.map((path) => [`view:${path}`, { kind: "view", path }]),
-    ...cards.map(({ name, card }, index) => [
+    ...cards.map(({ name, card, scale }, index) => [
       `card:${index}`,
-      { kind: "card", name, card },
+      { kind: "card", name, card, scale },
     ]),
     ...colors.map(({ color }, index) => [
       `color:${index}`,
@@ -235,6 +271,7 @@ export function normalizeConfig(config) {
         return {
           name: String(item?.name || `Karte ${index + 1}`),
           card,
+          scale: cardScale(item?.scale, index),
         };
       })
     : [];
@@ -281,6 +318,27 @@ export function normalizeConfig(config) {
   const schedulePanel = panelOrder.includes(requestedSchedulePanel)
     ? requestedSchedulePanel
     : panelOrder[0] || "";
+  const brightnessScheduleStart = timeOption(
+    config.brightness_schedule_start,
+    DEFAULT_CONFIG.brightness_schedule_start,
+    "brightness_schedule_start",
+  );
+  const brightnessScheduleEnd = timeOption(
+    config.brightness_schedule_end,
+    DEFAULT_CONFIG.brightness_schedule_end,
+    "brightness_schedule_end",
+  );
+  const brightnessScheduleEnabled = Boolean(
+    config.brightness_schedule_enabled,
+  );
+  if (
+    brightnessScheduleEnabled &&
+    brightnessScheduleStart === brightnessScheduleEnd
+  ) {
+    throw new Error(
+      "Start und Ende des Helligkeitszeitplans müssen unterschiedlich sein.",
+    );
+  }
 
   if (configured && panels.length === 0) {
     throw new Error(
@@ -326,6 +384,29 @@ export function normalizeConfig(config) {
     schedule_end: scheduleEnd,
     schedule_mode: scheduleMode,
     schedule_panel: schedulePanel,
+    dashboard_brightness: brightnessOption(
+      config.dashboard_brightness,
+      DEFAULT_CONFIG.dashboard_brightness,
+      "dashboard_brightness",
+    ),
+    screensaver_brightness: brightnessOption(
+      config.screensaver_brightness,
+      DEFAULT_CONFIG.screensaver_brightness,
+      "screensaver_brightness",
+    ),
+    brightness_schedule_enabled: brightnessScheduleEnabled,
+    brightness_schedule_start: brightnessScheduleStart,
+    brightness_schedule_end: brightnessScheduleEnd,
+    brightness_schedule_dashboard: brightnessOption(
+      config.brightness_schedule_dashboard,
+      DEFAULT_CONFIG.brightness_schedule_dashboard,
+      "brightness_schedule_dashboard",
+    ),
+    brightness_schedule_screensaver: brightnessOption(
+      config.brightness_schedule_screensaver,
+      DEFAULT_CONFIG.brightness_schedule_screensaver,
+      "brightness_schedule_screensaver",
+    ),
     show_progress:
       config.show_progress === undefined
         ? DEFAULT_CONFIG.show_progress
@@ -356,7 +437,12 @@ export class ScreensaverController {
     this._activeShuffle = false;
     this._scheduleStateKey = "normal";
     this._helpersPromise = undefined;
+    this._lovelaceResourcesPromise = undefined;
+    this._lovelaceResourceLoads = new Map();
     this._lastPointerMove = 0;
+    this._pageScrollLock = undefined;
+    this._pageScrollStyle = undefined;
+    this._brightnessOverlay = undefined;
 
     this._onWindowActivity = this._onWindowActivity.bind(this);
     this._onOverlayInteraction = this._onOverlayInteraction.bind(this);
@@ -368,7 +454,9 @@ export class ScreensaverController {
     if (this._connected || !globalThis.window || !globalThis.document) return;
     this._connected = true;
     this._addActivityListeners();
+    this._createBrightnessOverlay();
     this._createOverlay();
+    this._syncBrightness();
     this._armIdleTimer();
   }
 
@@ -378,6 +466,7 @@ export class ScreensaverController {
     this._deactivate(false);
     this._removeActivityListeners();
     this._destroyOverlay();
+    this._destroyBrightnessOverlay();
   }
 
   setConfig(value) {
@@ -391,15 +480,19 @@ export class ScreensaverController {
 
     this._deactivate(false);
     this._destroyOverlay();
+    this._destroyBrightnessOverlay();
     this._config = config;
     this._scheduleStateKey = this._schedulePlayback().key;
+    this._createBrightnessOverlay();
     this._createOverlay();
+    this._syncBrightness();
     this._armIdleTimer();
   }
 
   setHass(hass) {
     const hadHass = Boolean(this._hass);
     this._hass = hass;
+    this._syncBrightness();
     if (this._surface) {
       for (const slide of this._surface.children) {
         if (slide._screensaverCard) slide._screensaverCard.hass = hass;
@@ -425,6 +518,7 @@ export class ScreensaverController {
   }
 
   syncSchedule(now = new Date()) {
+    this._syncBrightness(now);
     const playback = this._schedulePlayback(now);
     if (playback.key === this._scheduleStateKey) return;
     const previousKey = this._scheduleStateKey;
@@ -496,6 +590,60 @@ export class ScreensaverController {
     );
   }
 
+  _isWallpanelSession() {
+    return Boolean(
+      this._connected &&
+        this._hass &&
+        this._config.configured &&
+        this._config.enabled &&
+        hasKioskParameter() &&
+        !hasEmbeddedParameter(),
+    );
+  }
+
+  _brightnessLevels(now = new Date()) {
+    const scheduled = Boolean(
+      this._config.brightness_schedule_enabled &&
+        isMinuteInDailyRange(
+          localMinutes(now, this._hass?.config?.time_zone),
+          this._config.brightness_schedule_start,
+          this._config.brightness_schedule_end,
+        ),
+    );
+    return {
+      scheduled,
+      dashboard: scheduled
+        ? this._config.brightness_schedule_dashboard
+        : this._config.dashboard_brightness,
+      screensaver: scheduled
+        ? this._config.brightness_schedule_screensaver
+        : this._config.screensaver_brightness,
+    };
+  }
+
+  _syncBrightness(now = new Date()) {
+    this._createBrightnessOverlay();
+    const levels = this._brightnessLevels(now);
+    const dashboardOpacity = Math.max(0, Math.min(1, 1 - levels.dashboard / 100));
+    const screensaverOpacity = Math.max(
+      0,
+      Math.min(1, 1 - levels.screensaver / 100),
+    );
+
+    if (this._brightnessOverlay) {
+      const visible = this._isWallpanelSession() && !this._active && dashboardOpacity > 0;
+      this._brightnessOverlay.hidden = !visible;
+      this._brightnessOverlay.style.setProperty(
+        "--dashboard-dim-opacity",
+        String(dashboardOpacity),
+      );
+    }
+    this._overlayHost?.style?.setProperty(
+      "--screensaver-dim-opacity",
+      String(screensaverOpacity),
+    );
+  }
+
   _addActivityListeners() {
     window.addEventListener("pointerdown", this._onWindowActivity, true);
     window.addEventListener("pointermove", this._onWindowActivity, {
@@ -503,7 +651,11 @@ export class ScreensaverController {
       passive: true,
     });
     window.addEventListener("keydown", this._onWindowActivity, true);
-    window.addEventListener("wheel", this._onWindowActivity, {
+    // Observe the result of scrolling instead of every wheel packet. In
+    // particular Safari keeps high-frequency wheel listeners on the critical
+    // path of Home Assistant's virtualized card picker even when they are
+    // passive. The screensaver overlay still owns wheel-to-wake while active.
+    window.addEventListener("scroll", this._onWindowActivity, {
       capture: true,
       passive: true,
     });
@@ -520,7 +672,7 @@ export class ScreensaverController {
     window.removeEventListener("pointerdown", this._onWindowActivity, true);
     window.removeEventListener("pointermove", this._onWindowActivity, true);
     window.removeEventListener("keydown", this._onWindowActivity, true);
-    window.removeEventListener("wheel", this._onWindowActivity, true);
+    window.removeEventListener("scroll", this._onWindowActivity, true);
     window.removeEventListener("location-changed", this._onLocationChange);
     window.removeEventListener("popstate", this._onLocationChange);
     document.removeEventListener(
@@ -532,10 +684,9 @@ export class ScreensaverController {
 
   _onWindowActivity(event) {
     if (this._active) {
-      // Wheel events stay passive at window level so Home Assistant can use
-      // compositor scrolling without waiting for HA-Wallpanel. While the
-      // screensaver is visible, its overlay owns and cancels the wheel event.
-      if (event.type === "wheel") return;
+      // Programmatic scrolling behind the overlay must not dismiss it. Actual
+      // wheel/touch interaction is captured directly by the overlay.
+      if (event.type === "scroll") return;
       if (event.type === "keydown") {
         event.preventDefault();
         event.stopPropagation();
@@ -554,6 +705,7 @@ export class ScreensaverController {
   }
 
   _onLocationChange() {
+    this._syncBrightness();
     if (!this._isEligible()) {
       this._deactivate(false);
       this._clearIdleTimer();
@@ -601,6 +753,130 @@ export class ScreensaverController {
     this._idleTimer = undefined;
   }
 
+  _closeMoreInfoDialogs() {
+    if (!globalThis.document) return 0;
+    let closed = 0;
+    for (const dialog of findElementsDeep(document, "ha-more-info-dialog")) {
+      if (typeof dialog.closeDialog !== "function") continue;
+      dialog.closeDialog();
+      closed += 1;
+    }
+    return closed;
+  }
+
+  _lockPageScroll() {
+    if (this._pageScrollLock || !globalThis.document) return;
+
+    const elements = [document.documentElement, document.body].filter(
+      (element) => element?.style,
+    );
+    this._pageScrollLock = elements.map((element) => ({
+      element,
+      overflow: {
+        value: element.style.getPropertyValue("overflow"),
+        priority: element.style.getPropertyPriority("overflow"),
+      },
+      overscrollBehavior: {
+        value: element.style.getPropertyValue("overscroll-behavior"),
+        priority: element.style.getPropertyPriority("overscroll-behavior"),
+      },
+    }));
+
+    for (const { element } of this._pageScrollLock) {
+      element.style.setProperty("overflow", "hidden", "important");
+      element.style.setProperty("overscroll-behavior", "none", "important");
+    }
+
+    const target = document.head || document.documentElement || document.body;
+    if (typeof target?.appendChild !== "function") return;
+
+    const style = document.createElement("style");
+    style.setAttribute(SCREENSAVER_SCROLL_LOCK_STYLE_ATTRIBUTE, "true");
+    style.textContent = `html, body {
+      overflow: hidden !important;
+      overscroll-behavior: none !important;
+      scrollbar-width: none !important;
+      -ms-overflow-style: none !important;
+    }
+    html::-webkit-scrollbar,
+    body::-webkit-scrollbar {
+      width: 0 !important;
+      height: 0 !important;
+      display: none !important;
+    }`;
+    target.appendChild(style);
+    this._pageScrollStyle = style;
+  }
+
+  _unlockPageScroll() {
+    for (const saved of this._pageScrollLock || []) {
+      for (const [property, original] of [
+        ["overflow", saved.overflow],
+        ["overscroll-behavior", saved.overscrollBehavior],
+      ]) {
+        if (original.value) {
+          saved.element.style.setProperty(
+            property,
+            original.value,
+            original.priority,
+          );
+        } else {
+          saved.element.style.removeProperty(property);
+        }
+      }
+    }
+    this._pageScrollLock = undefined;
+    this._pageScrollStyle?.remove?.();
+    this._pageScrollStyle = undefined;
+  }
+
+  _createBrightnessOverlay() {
+    if (
+      this._brightnessOverlay ||
+      !this._config.configured ||
+      !globalThis.document?.body
+    ) {
+      return;
+    }
+
+    const overlay = document.createElement("div");
+    overlay.id = "ha-wallpanel-dashboard-brightness-overlay";
+    overlay.hidden = true;
+    overlay.setAttribute("aria-hidden", "true");
+    const shadow = overlay.attachShadow({ mode: "open" });
+    shadow.innerHTML = `
+      <style>
+        :host {
+          all: initial;
+          position: fixed;
+          inset: 0;
+          z-index: 2147483646;
+          display: block;
+          width: 100vw;
+          height: 100vh;
+          height: 100dvh;
+          overflow: hidden;
+          background: #000;
+          opacity: var(--dashboard-dim-opacity, 0);
+          pointer-events: none;
+          touch-action: none;
+          transition: opacity 200ms linear;
+        }
+        :host([hidden]) { display: none; }
+        @media (prefers-reduced-motion: reduce) {
+          :host { transition-duration: 0.01ms; }
+        }
+      </style>
+    `;
+    document.body.appendChild(overlay);
+    this._brightnessOverlay = overlay;
+  }
+
+  _destroyBrightnessOverlay() {
+    this._brightnessOverlay?.remove?.();
+    this._brightnessOverlay = undefined;
+  }
+
   _createOverlay() {
     if (
       this._overlayHost ||
@@ -627,6 +903,7 @@ export class ScreensaverController {
       "--screensaver-cursor",
       this._config.hide_cursor ? "none" : "default",
     );
+    host.style.setProperty("--screensaver-dim-opacity", "0");
 
     const shadow = host.attachShadow({ mode: "open" });
     shadow.innerHTML = `
@@ -755,6 +1032,16 @@ export class ScreensaverController {
 
         .indicator[hidden] { display: none; }
 
+        .brightness-overlay {
+          position: absolute;
+          z-index: 3;
+          inset: 0;
+          background: #000;
+          opacity: var(--screensaver-dim-opacity, 0);
+          pointer-events: none;
+          transition: opacity 200ms linear;
+        }
+
         .dot {
           width: 7px;
           height: 7px;
@@ -777,6 +1064,7 @@ export class ScreensaverController {
       </style>
       <main class="surface" aria-live="off"></main>
       <nav class="indicator" aria-hidden="true"></nav>
+      <div class="brightness-overlay" aria-hidden="true"></div>
     `;
 
     this._overlayHost = host;
@@ -813,6 +1101,7 @@ export class ScreensaverController {
     this._clearRotationTimer();
     this._clearTransitionTimers();
     this._clearCursorTimer();
+    this._unlockPageScroll();
 
     if (this._overlayHost) {
       this._overlayHost.removeEventListener(
@@ -857,10 +1146,13 @@ export class ScreensaverController {
     const playback = this._schedulePlayback();
     if (playback.panels.length === 0) return;
 
+    this._closeMoreInfoDialogs();
+    this._lockPageScroll();
     this._clearIdleTimer();
     this._clearRotationTimer();
     this._activationToken += 1;
     this._active = true;
+    this._syncBrightness();
     this._scheduleStateKey = playback.key;
     this._activePanels = playback.panels;
     this._activeShuffle = playback.shuffle;
@@ -885,15 +1177,19 @@ export class ScreensaverController {
 
   _deactivate(rearm) {
     if (!this._active) {
+      this._unlockPageScroll();
+      this._syncBrightness();
       if (rearm) this._armIdleTimer();
       return;
     }
 
     this._activationToken += 1;
     this._active = false;
+    this._syncBrightness();
     this._clearRotationTimer();
     this._clearTransitionTimers();
     this._clearCursorTimer();
+    this._unlockPageScroll();
     this._overlayHost?.classList.remove("visible");
     if (this._overlayHost) {
       this._overlayHost.hidden = true;
@@ -949,7 +1245,14 @@ export class ScreensaverController {
           slide.remove();
           return;
         }
-        this._mountCard(frame, slide, card, panel.card, token);
+        this._mountCard(
+          frame,
+          slide,
+          card,
+          panel.card,
+          panel.scale,
+          token,
+        );
       }
     } catch (error) {
       if (!this._active || token !== this._activationToken) return;
@@ -967,6 +1270,7 @@ export class ScreensaverController {
   }
 
   async _instantiateCard(cardConfig) {
+    await this._ensureCustomCardAvailable(cardConfig);
     if (
       globalThis.document?.createElement &&
       globalThis.customElements?.get?.("hui-card")
@@ -989,6 +1293,115 @@ export class ScreensaverController {
     card.hass = this._hass;
     this._applyPanelCardContext(card);
     return card;
+  }
+
+  async _ensureCustomCardAvailable(cardConfig) {
+    const type = String(cardConfig?.type || "");
+    if (!type.startsWith("custom:")) return;
+
+    const elementName = type.slice("custom:".length).trim();
+    if (!elementName || globalThis.customElements?.get?.(elementName)) return;
+
+    await this._ensureLovelaceResources(elementName);
+    if (!globalThis.customElements?.get?.(elementName)) {
+      throw new Error(
+        `Die Custom Card ${elementName} ist nicht geladen. ` +
+          "Prüfe ihre Lovelace-Ressource in Home Assistant.",
+      );
+    }
+  }
+
+  async _ensureLovelaceResources(elementName) {
+    const hass = this._hass;
+    const sendMessage = hass?.connection?.sendMessagePromise?.bind(
+      hass.connection,
+    );
+    if (!sendMessage) return;
+    if (!this._lovelaceResourcesPromise) {
+      this._lovelaceResourcesPromise = (async () => {
+        const resources = await sendMessage({ type: "lovelace/resources" });
+        return Array.isArray(resources) ? resources : [];
+      })().catch((error) => {
+        this._lovelaceResourcesPromise = undefined;
+        console.warn(
+          "HA-Wallpanel: Lovelace-Ressourcen konnten für den Screensaver nicht geladen werden",
+          error,
+        );
+        return [];
+      });
+    }
+    const resources = await this._lovelaceResourcesPromise;
+    const normalizedName = String(elementName || "").toLowerCase();
+    const shortName = normalizedName.replace(/-card$/, "");
+    const ordered = resources
+      .map((resource, index) => {
+        const url = String(resource?.url || "").toLowerCase();
+        const score = url.includes(normalizedName)
+          ? 2
+          : shortName && url.includes(shortName)
+            ? 1
+            : 0;
+        return { resource, index, score };
+      })
+      .sort((left, right) => right.score - left.score || left.index - right.index);
+
+    for (const { resource } of ordered) {
+      try {
+        await this._loadLovelaceResource(resource, hass);
+      } catch {
+        // A stale unrelated resource must not prevent the selected card loading.
+      }
+      if (globalThis.customElements?.get?.(elementName)) return;
+    }
+  }
+
+  _loadLovelaceResource(resource, hass) {
+    if (!resource || typeof resource.url !== "string") {
+      return Promise.resolve();
+    }
+    const baseUrl =
+      hass.auth?.data?.hassUrl || globalThis.location?.origin || "http://localhost";
+    const url = new URL(resource.url, baseUrl).toString();
+    const type = String(resource.type || "module");
+    const key = `${type}:${url}`;
+    if (this._lovelaceResourceLoads.has(key)) {
+      return this._lovelaceResourceLoads.get(key);
+    }
+
+    let load;
+    if (type === "module") {
+      load = import(url);
+    } else if ((type === "js" || type === "css") && globalThis.document) {
+      const isScript = type === "js";
+      const element = document.createElement(isScript ? "script" : "link");
+      if (isScript) {
+        element.src = url;
+      } else {
+        element.rel = "stylesheet";
+        element.href = url;
+      }
+      load = new Promise((resolve, reject) => {
+        element.addEventListener("load", resolve, { once: true });
+        element.addEventListener(
+          "error",
+          () => reject(new Error(`Ressource konnte nicht geladen werden: ${url}`)),
+          { once: true },
+        );
+        (document.head || document.documentElement).appendChild(element);
+      });
+    } else {
+      load = Promise.resolve();
+    }
+
+    const guardedLoad = load.catch((error) => {
+      console.error(
+        `HA-Wallpanel: Lovelace-Ressource ${url} (${type}) konnte nicht geladen werden`,
+        error,
+      );
+      throw error;
+    });
+    this._lovelaceResourceLoads.set(key, guardedLoad);
+    return guardedLoad;
   }
 
   _applyPanelCardContext(card) {
@@ -1035,7 +1448,18 @@ export class ScreensaverController {
     frame.replaceChildren(iframe);
   }
 
-  _mountCard(frame, slide, card, cardConfig, token) {
+  _mountCard(frame, slide, card, cardConfig, scale, token) {
+    const factor = cardScale(scale, 0) / 100;
+    const inverseSize = `${100 / factor}%`;
+    frame.style.setProperty("display", "flex");
+    frame.style.setProperty("align-items", "center");
+    frame.style.setProperty("justify-content", "center");
+    card.style?.setProperty?.("flex", "0 0 auto");
+    card.style?.setProperty?.("width", inverseSize);
+    card.style?.setProperty?.("height", inverseSize);
+    card.style?.setProperty?.("min-height", inverseSize);
+    card.style?.setProperty?.("transform", `scale(${factor})`);
+    card.style?.setProperty?.("transform-origin", "center center");
     frame.replaceChildren(card);
     slide._screensaverCard = card;
     card.addEventListener(
@@ -1048,7 +1472,14 @@ export class ScreensaverController {
         try {
           const replacement = await this._instantiateCard(cardConfig);
           if (this._active && token === this._activationToken && slide.isConnected) {
-            this._mountCard(frame, slide, replacement, cardConfig, token);
+            this._mountCard(
+              frame,
+              slide,
+              replacement,
+              cardConfig,
+              scale,
+              token,
+            );
           }
         } catch {
           // Home Assistant keeps the existing error card visible.
@@ -1278,12 +1709,23 @@ export class KioskModeController {
     const drawer = mainRoot.querySelector("ha-drawer");
     const drawerRoot = drawer?.shadowRoot;
     const sidebar =
+      mainRoot.querySelector("ha-sidebar") ||
       drawerRoot?.querySelector(".sidebar-shell") ||
       drawerRoot?.querySelector("aside");
 
-    const lovelace = mainRoot.querySelector("ha-panel-lovelace");
-    const huiRoot = lovelace?.shadowRoot?.querySelector("hui-root");
+    const resolver = mainRoot.querySelector("partial-panel-resolver");
+    const activePanel =
+      resolver?.lastElementChild || mainRoot.querySelector("ha-panel-lovelace");
+    const panelRoot = activePanel?.shadowRoot;
+    const huiRoot = panelRoot?.querySelector("hui-root");
     const huiRootShadow = huiRoot?.shadowRoot;
+    const path = globalThis.location?.pathname
+      ?.split("/")
+      .filter(Boolean)[0];
+    const component =
+      homeAssistant?.hass?.panels?.[path]?.component_name ||
+      activePanel?.localName?.replace(/^ha-panel-/, "");
+    const isDashboardPanel = DASHBOARD_PANEL_COMPONENTS.has(component);
 
     return {
       main,
@@ -1293,10 +1735,10 @@ export class KioskModeController {
         huiRootShadow?.querySelector("app-toolbar") ||
         huiRootShadow?.querySelector("div.toolbar"),
       view: huiRootShadow?.querySelector("#view"),
-      // Scrollbars belong to the Lovelace view. Do not leave these broad CSS
-      // rules active after navigating from a kiosk dashboard into HA settings.
-      styleRoots: huiRootShadow
-        ? [document, lovelace?.shadowRoot, huiRootShadow].filter(Boolean)
+      // Scrollbars belong to dashboard views. Do not leave these broad CSS
+      // rules active after navigating from kiosk mode into HA settings.
+      styleRoots: isDashboardPanel
+        ? [document, panelRoot, huiRootShadow].filter(Boolean)
         : [],
     };
   }
@@ -1442,6 +1884,7 @@ export class KioskModeController {
   }
 
   _onNavigation() {
+    if (this._sessionActive) this._ensureUrlParameter();
     window.requestAnimationFrame(() => this.sync());
     window.setTimeout(() => this.sync(), 250);
   }
@@ -1449,6 +1892,7 @@ export class KioskModeController {
 
 export class WallpanelSettingsController {
   constructor() {
+    this._activeFlow = undefined;
     this._scrollDialogs = new Map();
     this._cardButtons = new Map();
     this._flowHooks = new Map();
@@ -1457,6 +1901,7 @@ export class WallpanelSettingsController {
     this._openingCardEditor = false;
     this._openingCardDesigner = false;
     this._activeCardDesigner = undefined;
+    this._activeCardScaleDialog = undefined;
     this._lovelaceLoadPromise = undefined;
     this._lovelaceTranslationPromise = undefined;
     this._lovelaceResourcesPromise = undefined;
@@ -1466,10 +1911,14 @@ export class WallpanelSettingsController {
 
   sync() {
     this._removeDisconnectedHooks();
-    const flow = findElementsDeep(document, "dialog-data-entry-flow").find(
-      (element) =>
-        this._knownFlows.has(element) || this._isWallpanelFlow(element),
-    );
+    let flow = this._activeFlow;
+    if (!flow || flow.isConnected === false) {
+      flow = findElementsDeep(document, "dialog-data-entry-flow").find(
+        (element) =>
+          this._knownFlows.has(element) || this._isWallpanelFlow(element),
+      );
+      this._activeFlow = flow;
+    }
     if (!flow) return;
     this._knownFlows.add(flow);
     this._enableAutoClose(flow);
@@ -1498,6 +1947,7 @@ export class WallpanelSettingsController {
   }
 
   stop() {
+    this._activeFlow = undefined;
     for (const [dialog, hook] of this._scrollDialogs) {
       hook.body.removeEventListener("wheel", hook.listener, true);
       this._restoreStyles(dialog, hook.dialogStyles);
@@ -1517,6 +1967,8 @@ export class WallpanelSettingsController {
 
     this._activeCardDesigner?.close?.();
     this._activeCardDesigner = undefined;
+    this._activeCardScaleDialog?.close?.();
+    this._activeCardScaleDialog = undefined;
   }
 
   _isWallpanelFlow(flow) {
@@ -1545,6 +1997,13 @@ export class WallpanelSettingsController {
       "schedule_end",
       "schedule_mode",
       "schedule_panel",
+      "dashboard_brightness",
+      "screensaver_brightness",
+      "brightness_schedule_enabled",
+      "brightness_schedule_start",
+      "brightness_schedule_end",
+      "brightness_schedule_dashboard",
+      "brightness_schedule_screensaver",
       "idle_time",
       "display_time",
       "transition_time",
@@ -1594,6 +2053,19 @@ export class WallpanelSettingsController {
     const scheduleEndField = fields.get("schedule_end");
     const scheduleModeField = fields.get("schedule_mode");
     const schedulePanelField = fields.get("schedule_panel");
+    const dashboardBrightnessField = fields.get("dashboard_brightness");
+    const screensaverBrightnessField = fields.get("screensaver_brightness");
+    const brightnessScheduleEnabledField = fields.get(
+      "brightness_schedule_enabled",
+    );
+    const brightnessScheduleStartField = fields.get("brightness_schedule_start");
+    const brightnessScheduleEndField = fields.get("brightness_schedule_end");
+    const brightnessScheduleDashboardField = fields.get(
+      "brightness_schedule_dashboard",
+    );
+    const brightnessScheduleScreensaverField = fields.get(
+      "brightness_schedule_screensaver",
+    );
     if (!enabledField || !viewField || !cardField || !colorField || !orderField) {
       return;
     }
@@ -1666,9 +2138,118 @@ export class WallpanelSettingsController {
       scheduleEndField,
       scheduleModeField,
       schedulePanelField,
+      dashboardBrightnessField,
+      screensaverBrightnessField,
+      brightnessScheduleEnabledField,
+      brightnessScheduleStartField,
+      brightnessScheduleEndField,
+      brightnessScheduleDashboardField,
+      brightnessScheduleScreensaverField,
     };
     this._renderPanelEditor(editor);
+    this._setupBrightnessEditor(root, editor);
     this._setupScheduleEditor(root, editor);
+  }
+
+  _setupBrightnessEditor(root, editor) {
+    const state = editor._wallpanelState;
+    if (
+      !state?.dashboardBrightnessField ||
+      !state.screensaverBrightnessField ||
+      !state.brightnessScheduleEnabledField ||
+      !state.brightnessScheduleStartField ||
+      !state.brightnessScheduleEndField ||
+      !state.brightnessScheduleDashboardField ||
+      !state.brightnessScheduleScreensaverField
+    ) {
+      return;
+    }
+
+    let heading = root.querySelector("[data-ha-wallpanel-brightness-heading]");
+    if (!heading) {
+      heading = document.createElement("div");
+      heading.dataset.haWallpanelBrightnessHeading = "";
+      const title = document.createElement("div");
+      title.textContent = "Helligkeit";
+      Object.assign(title.style, {
+        color: "var(--primary-text-color)",
+        fontSize: "18px",
+        fontWeight: "500",
+      });
+      const description = document.createElement("div");
+      description.textContent =
+        "Dashboard und Screensaver werden getrennt über berührungslose Overlays abgedunkelt.";
+      Object.assign(description.style, {
+        color: "var(--secondary-text-color)",
+        fontSize: "13px",
+        lineHeight: "1.4",
+        marginTop: "4px",
+      });
+      Object.assign(heading.style, {
+        margin: "4px 0 14px",
+        minWidth: "0",
+      });
+      heading.append(title, description);
+    }
+    if (state.dashboardBrightnessField.previousElementSibling !== heading) {
+      state.dashboardBrightnessField.before(heading);
+    }
+
+    let scheduleHeading = root.querySelector(
+      "[data-ha-wallpanel-brightness-schedule-heading]",
+    );
+    if (!scheduleHeading) {
+      scheduleHeading = document.createElement("div");
+      scheduleHeading.dataset.haWallpanelBrightnessScheduleHeading = "";
+      scheduleHeading.textContent = "Zeitgesteuerte Helligkeit";
+      Object.assign(scheduleHeading.style, {
+        color: "var(--primary-text-color)",
+        fontSize: "16px",
+        fontWeight: "500",
+        margin: "8px 0 8px",
+        minWidth: "0",
+      });
+    }
+    if (
+      state.brightnessScheduleEnabledField.previousElementSibling !==
+      scheduleHeading
+    ) {
+      state.brightnessScheduleEnabledField.before(scheduleHeading);
+    }
+
+    const scheduledFields = [
+      state.brightnessScheduleStartField,
+      state.brightnessScheduleEndField,
+      state.brightnessScheduleDashboardField,
+      state.brightnessScheduleScreensaverField,
+    ];
+    const updateVisibility = () => {
+      const visible = Boolean(state.brightnessScheduleEnabledField.value);
+      for (const field of scheduledFields) {
+        field.hidden = !visible;
+        field.style.setProperty(
+          "display",
+          visible ? "block" : "none",
+          "important",
+        );
+      }
+    };
+    if (!state.brightnessScheduleEnabledField._wallpanelBrightnessListener) {
+      const listener = () => {
+        if (globalThis.window?.requestAnimationFrame) {
+          window.requestAnimationFrame(updateVisibility);
+        } else {
+          updateVisibility();
+        }
+      };
+      state.brightnessScheduleEnabledField.addEventListener(
+        "value-changed",
+        listener,
+      );
+      state.brightnessScheduleEnabledField._wallpanelBrightnessListener =
+        listener;
+    }
+    updateVisibility();
   }
 
   _setupScheduleEditor(root, editor) {
@@ -1823,6 +2404,50 @@ export class WallpanelSettingsController {
     editor.style.setProperty("min-width", "0", "important");
     editor.style.setProperty("margin", "4px 0 18px", "important");
 
+    const responsiveStyle = document.createElement("style");
+    responsiveStyle.textContent = `
+      [data-ha-wallpanel-panel-editor] .ha-wallpanel-panel-actions > ha-button {
+        flex: 0 0 48px !important;
+        width: 48px !important;
+        min-width: 0 !important;
+      }
+      [data-ha-wallpanel-panel-editor] .ha-wallpanel-action-icon {
+        display: inline-flex !important;
+      }
+      @media (max-width: 600px) {
+        [data-ha-wallpanel-panel-editor] .ha-wallpanel-panel-toolbar {
+          display: grid !important;
+          grid-template-columns: minmax(0, 1fr) !important;
+          width: 100% !important;
+        }
+        [data-ha-wallpanel-panel-editor] .ha-wallpanel-panel-toolbar > ha-button {
+          width: 100% !important;
+          min-width: 0 !important;
+        }
+        [data-ha-wallpanel-panel-editor] .ha-wallpanel-panel-item {
+          flex-direction: column !important;
+          align-items: stretch !important;
+          gap: 4px !important;
+          padding: 10px 0 !important;
+        }
+        [data-ha-wallpanel-panel-editor] .ha-wallpanel-panel-summary {
+          width: 100% !important;
+        }
+        [data-ha-wallpanel-panel-editor] .ha-wallpanel-panel-actions {
+          display: flex !important;
+          flex-wrap: nowrap !important;
+          justify-content: flex-end !important;
+          width: 100% !important;
+          gap: 4px !important;
+        }
+        [data-ha-wallpanel-panel-editor] .ha-wallpanel-panel-actions > ha-button {
+          flex: 0 0 48px !important;
+          width: 48px !important;
+          min-width: 0 !important;
+        }
+      }
+    `;
+
     const toolbar = document.createElement("div");
     toolbar.className = "ha-wallpanel-panel-toolbar";
     Object.assign(toolbar.style, {
@@ -1878,7 +2503,7 @@ export class WallpanelSettingsController {
     sortableContainer.className = "ha-wallpanel-panel-list-content";
     sortable.appendChild(sortableContainer);
 
-    editor.append(toolbar, heading, empty, sortable);
+    editor.append(responsiveStyle, toolbar, heading, empty, sortable);
     editor._wallpanelElements = {
       toolbar,
       heading,
@@ -1986,7 +2611,7 @@ export class WallpanelSettingsController {
       const card = state.cards[index];
       return {
         kind,
-        kindLabel: "Dashboard-Karte",
+        kindLabel: `Dashboard-Karte · ${cardScale(card?.scale, index)} %`,
         label: String(card?.name || card?.card?.title || `Karte ${index + 1}`),
         index,
       };
@@ -2025,6 +2650,16 @@ export class WallpanelSettingsController {
         boxSizing: "border-box",
       });
 
+      const summary = document.createElement("div");
+      summary.className = "ha-wallpanel-panel-summary";
+      Object.assign(summary.style, {
+        display: "flex",
+        flex: "1 1 auto",
+        alignItems: "center",
+        gap: "10px",
+        minWidth: "0",
+      });
+
       const handle = document.createElement("button");
       handle.type = "button";
       handle.className = "ha-wallpanel-panel-handle";
@@ -2056,9 +2691,9 @@ export class WallpanelSettingsController {
           boxSizing: "border-box",
           backgroundColor: descriptor.color,
         });
-        row.append(handle, swatch);
+        summary.append(handle, swatch);
       } else {
-        row.append(handle);
+        summary.append(handle);
       }
 
       const text = document.createElement("div");
@@ -2080,44 +2715,81 @@ export class WallpanelSettingsController {
         marginTop: "2px",
       });
       text.append(label, kind);
-      row.append(text);
+      summary.append(text);
+      row.append(summary);
+
+      const actions = document.createElement("div");
+      actions.className = "ha-wallpanel-panel-actions";
+      Object.assign(actions.style, {
+        display: "flex",
+        flex: "0 0 auto",
+        alignItems: "center",
+        justifyContent: "flex-end",
+        gap: "4px",
+        minWidth: "0",
+      });
+
+      if (descriptor.kind === "card") {
+        const currentScale = cardScale(
+          state.cards[descriptor.index]?.scale,
+          descriptor.index,
+        );
+        actions.append(
+          this._createPanelIconButton(
+            "mdi:resize",
+            `Kartengröße einstellen (${currentScale} %)`,
+            () => this._openCardScaleDialog(editor, descriptor.index),
+          ),
+        );
+      }
 
       if (descriptor.kind !== "view") {
-        const edit = document.createElement("ha-button");
-        edit.textContent = "Bearbeiten";
-        edit.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          this._editPanel(editor, token);
-        });
-        row.append(edit);
+        actions.append(
+          this._createPanelIconButton("mdi:pencil", "Bearbeiten", () =>
+            this._editPanel(editor, token),
+          ),
+        );
       }
 
       if (
         descriptor.kind === "card" &&
         this._dashboardDesignerAdapter(state.cards[descriptor.index]?.card)
       ) {
-        const designer = document.createElement("ha-button");
-        designer.textContent = "Designer";
-        designer.title = "Karteneigenen Designer öffnen";
-        designer.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          void this._openDashboardCardDesigner(editor, descriptor.index);
-        });
-        row.append(designer);
+        actions.append(
+          this._createPanelIconButton(
+            "mdi:palette",
+            "Karteneigenen Designer öffnen",
+            () => void this._openDashboardCardDesigner(editor, descriptor.index),
+          ),
+        );
       }
 
-      const remove = document.createElement("ha-button");
-      remove.textContent = "Entfernen";
-      remove.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        this._removePanel(editor, token);
-      });
-      row.append(remove);
+      actions.append(
+        this._createPanelIconButton("mdi:delete", "Entfernen", () =>
+          this._removePanel(editor, token),
+        ),
+      );
+      row.append(actions);
       elements.sortableContainer.appendChild(row);
     }
+  }
+
+  _createPanelIconButton(iconName, label, action) {
+    const button = document.createElement("ha-button");
+    button.className = "ha-wallpanel-panel-action";
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    button.setAttribute("appearance", "plain");
+    const icon = document.createElement("ha-icon");
+    icon.className = "ha-wallpanel-action-icon";
+    icon.setAttribute("icon", iconName);
+    button.append(icon);
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      action();
+    });
+    return button;
   }
 
   _editPanel(editor, token) {
@@ -2131,6 +2803,172 @@ export class WallpanelSettingsController {
     const item = selector.shadowRoot?.querySelectorAll(".item")?.[descriptor.index];
     const buttons = item?.querySelectorAll("ha-icon-button, mwc-icon-button") || [];
     buttons[0]?.click();
+  }
+
+  _openCardScaleDialog(editor, index) {
+    if (this._activeCardScaleDialog) return;
+    const state = editor?._wallpanelState;
+    const storedCard = state?.cards?.[index];
+    if (!storedCard) return;
+
+    const initialScale = cardScale(storedCard.scale, index);
+    const host = document.createElement("dialog");
+    host.className = "ha-wallpanel-card-scale-dialog";
+    host.setAttribute("role", "dialog");
+    host.setAttribute("aria-modal", "true");
+    Object.assign(host.style, {
+      width: "min(420px, calc(100vw - 32px))",
+      maxWidth: "420px",
+      margin: "auto",
+      padding: "0",
+      border: "0",
+      borderRadius: "24px",
+      boxSizing: "border-box",
+      overflow: "hidden",
+      color: "var(--primary-text-color)",
+      background: "var(--card-background-color, #1c1c1c)",
+      boxShadow: "0 12px 42px rgba(0, 0, 0, 0.45)",
+    });
+
+    const dialogStyle = document.createElement("style");
+    dialogStyle.textContent = `
+      .ha-wallpanel-card-scale-dialog::backdrop {
+        background: rgba(0, 0, 0, 0.55);
+      }
+      .ha-wallpanel-card-scale-dialog input[type="range"] {
+        width: 100%;
+        margin: 18px 0 8px;
+        accent-color: var(--primary-color, #03a9f4);
+      }
+    `;
+
+    const body = document.createElement("div");
+    Object.assign(body.style, {
+      display: "flex",
+      flexDirection: "column",
+      gap: "8px",
+      padding: "24px",
+      boxSizing: "border-box",
+    });
+
+    const title = document.createElement("h2");
+    title.id = "ha-wallpanel-card-scale-title";
+    title.textContent = "Kartengröße";
+    Object.assign(title.style, {
+      margin: "0",
+      fontSize: "22px",
+      fontWeight: "500",
+    });
+    host.setAttribute("aria-labelledby", title.id);
+
+    const cardName = document.createElement("div");
+    cardName.textContent = String(
+      storedCard.name || storedCard.card?.title || `Karte ${index + 1}`,
+    );
+    Object.assign(cardName.style, {
+      overflow: "hidden",
+      color: "var(--secondary-text-color)",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
+    });
+
+    const value = document.createElement("output");
+    value.textContent = `${initialScale} %`;
+    Object.assign(value.style, {
+      marginTop: "12px",
+      color: "var(--primary-text-color)",
+      fontSize: "32px",
+      fontWeight: "500",
+      textAlign: "center",
+    });
+
+    const range = document.createElement("input");
+    range.type = "range";
+    range.min = "50";
+    range.max = "300";
+    range.step = "25";
+    range.value = String(initialScale);
+    range.setAttribute("aria-label", "Kartengröße in Prozent");
+    range.addEventListener("input", () => {
+      value.textContent = `${range.value} %`;
+    });
+
+    const limits = document.createElement("div");
+    Object.assign(limits.style, {
+      display: "flex",
+      justifyContent: "space-between",
+      color: "var(--secondary-text-color)",
+      fontSize: "12px",
+    });
+    const minimum = document.createElement("span");
+    minimum.textContent = "50 %";
+    const maximum = document.createElement("span");
+    maximum.textContent = "300 %";
+    limits.append(minimum, maximum);
+
+    const actions = document.createElement("div");
+    Object.assign(actions.style, {
+      display: "flex",
+      justifyContent: "flex-end",
+      gap: "8px",
+      marginTop: "18px",
+    });
+    const cancel = document.createElement("ha-button");
+    cancel.textContent = "Abbrechen";
+    cancel.setAttribute("appearance", "plain");
+    const save = document.createElement("ha-button");
+    save.textContent = "Übernehmen";
+    actions.append(cancel, save);
+    body.append(title, cardName, value, range, limits, actions);
+    host.append(dialogStyle, body);
+
+    let closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      host.removeEventListener("cancel", onCancel);
+      if (host.open && typeof host.close === "function") host.close();
+      host.remove();
+      if (this._activeCardScaleDialog?.host === host) {
+        this._activeCardScaleDialog = undefined;
+      }
+    };
+    const onCancel = (event) => {
+      event.preventDefault();
+      close();
+    };
+    cancel.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+    });
+    save.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this._setCardScale(editor, index, Number(range.value));
+      close();
+    });
+    host.addEventListener("cancel", onCancel);
+
+    const mountRoot = document.body || this._getDialogMountRoot();
+    if (!mountRoot) return;
+    this._activeCardScaleDialog = { host, close };
+    mountRoot.appendChild(host);
+    if (typeof host.showModal === "function") host.showModal();
+    else host.setAttribute("open", "");
+    window.requestAnimationFrame(() => range.focus());
+  }
+
+  _setCardScale(editor, index, scale) {
+    const state = editor._wallpanelState;
+    if (!state?.cards?.[index]) return;
+    const nextScale = Math.max(50, Math.min(300, Math.round(scale / 25) * 25));
+    state.cards = state.cards.map((item, itemIndex) =>
+      itemIndex === index ? { ...item, scale: nextScale } : item,
+    );
+    this._dispatchValue(state.cardSelector, state.cards);
+    editor._wallpanelRenderKey = undefined;
+    this._renderPanelEditor(editor);
   }
 
   _dashboardDesignerAdapter(cardConfig) {
@@ -2427,6 +3265,7 @@ export class WallpanelSettingsController {
           const updatedCard = newConfig?.views?.[0]?.cards?.[0];
           if (updatedCard) this._replaceEditedCard(editor, index, updatedCard);
         },
+        true,
       );
       temporaryHost = launchTarget.temporaryHost;
       launchTarget.element.dispatchEvent(
@@ -2463,7 +3302,9 @@ export class WallpanelSettingsController {
     );
     const name = String(card.name || card.title || translated || type);
     const cards = state.cards.map((item, itemIndex) =>
-      itemIndex === index ? { name, card } : item,
+      itemIndex === index
+        ? { name, card, scale: cardScale(item.scale, itemIndex) }
+        : item,
     );
     state.cards = cards;
     this._dispatchValue(state.cardSelector, cards);
@@ -2575,6 +3416,39 @@ export class WallpanelSettingsController {
       ) {
         return;
       }
+      const path = event.composedPath?.() || [];
+      const bodyIndex = path.indexOf(body);
+      const innerPath = bodyIndex >= 0 ? path.slice(0, bodyIndex) : path;
+      const ownsScrolling = innerPath.some((element) => {
+        const name = String(
+          element?.localName || element?.tagName || "",
+        ).toLowerCase();
+        if (
+          name === "ha-dialog" ||
+          name === "hui-dialog-create-card" ||
+          name === "hui-dialog-edit-card" ||
+          name === "hui-card-picker"
+        ) {
+          return true;
+        }
+
+        const scrollHeight = Number(element?.scrollHeight);
+        const clientHeight = Number(element?.clientHeight);
+        const scrollTop = Number(element?.scrollTop);
+        if (
+          !Number.isFinite(scrollHeight) ||
+          !Number.isFinite(clientHeight) ||
+          !Number.isFinite(scrollTop) ||
+          scrollHeight <= clientHeight
+        ) {
+          return false;
+        }
+        return event.deltaY < 0
+          ? scrollTop > 0
+          : scrollTop + clientHeight < scrollHeight - 1;
+      });
+      if (ownsScrolling) return;
+
       const multiplier =
         event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? body.clientHeight : 1;
       const previous = body.scrollTop;
@@ -2696,6 +3570,7 @@ export class WallpanelSettingsController {
     hass,
     cards = [],
     saveConfig = async () => {},
+    editMode = false,
   ) {
 
     const config = {
@@ -2711,7 +3586,7 @@ export class WallpanelSettingsController {
     const lovelace = {
       config,
       rawConfig: config,
-      editMode: false,
+      editMode,
       mode: "storage",
       urlPath: "ha-wallpanel-card-picker",
       locale: hass.locale,
@@ -2945,7 +3820,7 @@ export class WallpanelSettingsController {
     const name = String(card.name || card.title || translated || type);
     selector.dispatchEvent(
       new CustomEvent("value-changed", {
-        detail: { value: [...current, { name, card }] },
+        detail: { value: [...current, { name, card, scale: 100 }] },
         bubbles: true,
         composed: true,
       }),
@@ -2999,6 +3874,20 @@ export class WallpanelSettingsController {
     const scheduleTimeFields = fields.filter((field) =>
       ["schedule_start", "schedule_end"].includes(field.name),
     );
+    const brightnessFields = fields.filter((field) =>
+      ["dashboard_brightness", "screensaver_brightness"].includes(field.name),
+    );
+    const brightnessScheduleTimeFields = fields.filter((field) =>
+      ["brightness_schedule_start", "brightness_schedule_end"].includes(
+        field.name,
+      ),
+    );
+    const brightnessScheduleFields = fields.filter((field) =>
+      [
+        "brightness_schedule_dashboard",
+        "brightness_schedule_screensaver",
+      ].includes(field.name),
+    );
     if (timeFields.length !== 3) return;
 
     const wide = root.clientWidth >= 680;
@@ -3031,6 +3920,20 @@ export class WallpanelSettingsController {
         );
         field.style.setProperty("margin-bottom", "8px", "important");
       });
+      for (const pair of [
+        brightnessFields,
+        brightnessScheduleTimeFields,
+        brightnessScheduleFields,
+      ]) {
+        pair.forEach((field, index) => {
+          field.style.setProperty(
+            "grid-column",
+            index === 0 ? "1 / 4" : "4 / 7",
+            "important",
+          );
+          field.style.setProperty("margin-bottom", "8px", "important");
+        });
+      }
     } else {
       root.style.removeProperty("display");
       root.style.removeProperty("grid-template-columns");
@@ -3048,6 +3951,14 @@ export class WallpanelSettingsController {
         field.style.removeProperty("grid-column");
         field.style.setProperty("margin-bottom", "8px", "important");
       });
+      for (const field of [
+        ...brightnessFields,
+        ...brightnessScheduleTimeFields,
+        ...brightnessScheduleFields,
+      ]) {
+        field.style.removeProperty("grid-column");
+        field.style.setProperty("margin-bottom", "8px", "important");
+      }
     }
   }
 
@@ -3070,6 +3981,9 @@ export class WallpanelSettingsController {
   }
 
   _removeDisconnectedHooks() {
+    if (this._activeFlow?.isConnected === false) {
+      this._activeFlow = undefined;
+    }
     for (const [dialog, hook] of this._scrollDialogs) {
       if (dialog.isConnected) continue;
       hook.body.removeEventListener("wheel", hook.listener, true);

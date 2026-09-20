@@ -8,8 +8,14 @@ import re
 from typing import Any
 
 from .const import (
+    CONF_BRIGHTNESS_SCHEDULE_DASHBOARD,
+    CONF_BRIGHTNESS_SCHEDULE_ENABLED,
+    CONF_BRIGHTNESS_SCHEDULE_END,
+    CONF_BRIGHTNESS_SCHEDULE_SCREENSAVER,
+    CONF_BRIGHTNESS_SCHEDULE_START,
     CONF_CARDS,
     CONF_COLORS,
+    CONF_DASHBOARD_BRIGHTNESS,
     CONF_DISPLAY_TIME,
     CONF_ENABLED,
     CONF_HIDE_CURSOR,
@@ -20,6 +26,7 @@ from .const import (
     CONF_SCHEDULE_MODE,
     CONF_SCHEDULE_PANEL,
     CONF_SCHEDULE_START,
+    CONF_SCREENSAVER_BRIGHTNESS,
     CONF_SHOW_PROGRESS,
     CONF_SHUFFLE,
     CONF_TRANSITION_TIME,
@@ -59,6 +66,16 @@ def _number(value: Any, name: str, minimum: float) -> float | int:
             "invalid_value", f"{name} must be at least {minimum}"
         )
     return int(parsed) if parsed.is_integer() else parsed
+
+
+def _percentage(value: Any, name: str) -> float | int:
+    """Validate a brightness percentage."""
+    parsed = _number(value, name, 0)
+    if parsed > 100:
+        raise ConfigValidationError(
+            "invalid_brightness", f"{name} must not be greater than 100"
+        )
+    return parsed
 
 
 def _views(value: Any) -> list[str]:
@@ -134,6 +151,7 @@ def _cards(value: Any) -> list[dict[str, Any]]:
     for index, item in enumerate(value, start=1):
         card = item.get("card") if isinstance(item, dict) else None
         name = item.get("name") if isinstance(item, dict) else None
+        scale = item.get("scale", 100) if isinstance(item, dict) else 100
         if card is None and isinstance(item, dict):
             # v0.4 stored the Lovelace configuration directly in the list.
             card = item
@@ -165,10 +183,21 @@ def _cards(value: Any) -> list[dict[str, Any]]:
             and card.get("content") in _LEGACY_DUMMY_CARD_CONTENTS
         ):
             continue
+        try:
+            scale = int(scale)
+        except (TypeError, ValueError) as err:
+            raise ConfigValidationError(
+                "invalid_cards", f"Card {index} scale must be a percentage"
+            ) from err
+        if scale < 50 or scale > 300:
+            raise ConfigValidationError(
+                "invalid_cards", f"Card {index} scale must be between 50 and 300"
+            )
         cards.append(
             {
                 "name": str(name or f"Karte {index}"),
                 "card": deepcopy(card),
+                "scale": scale,
             }
         )
     return cards
@@ -277,6 +306,22 @@ def normalize_config(
             "invalid_panels", "Select a view, card, or fullscreen color"
         )
 
+    brightness_schedule_start = _time_value(
+        config[CONF_BRIGHTNESS_SCHEDULE_START], CONF_BRIGHTNESS_SCHEDULE_START
+    )
+    brightness_schedule_end = _time_value(
+        config[CONF_BRIGHTNESS_SCHEDULE_END], CONF_BRIGHTNESS_SCHEDULE_END
+    )
+    brightness_schedule_enabled = bool(config[CONF_BRIGHTNESS_SCHEDULE_ENABLED])
+    if (
+        brightness_schedule_enabled
+        and brightness_schedule_start == brightness_schedule_end
+    ):
+        raise ConfigValidationError(
+            "invalid_brightness",
+            "Brightness schedule start and end must differ",
+        )
+
     display_time = _number(config[CONF_DISPLAY_TIME], CONF_DISPLAY_TIME, 1)
     transition_time = _number(
         config[CONF_TRANSITION_TIME], CONF_TRANSITION_TIME, 0
@@ -304,4 +349,21 @@ def normalize_config(
         CONF_SCHEDULE_END: schedule_end,
         CONF_SCHEDULE_MODE: schedule_mode,
         CONF_SCHEDULE_PANEL: schedule_panel,
+        CONF_DASHBOARD_BRIGHTNESS: _percentage(
+            config[CONF_DASHBOARD_BRIGHTNESS], CONF_DASHBOARD_BRIGHTNESS
+        ),
+        CONF_SCREENSAVER_BRIGHTNESS: _percentage(
+            config[CONF_SCREENSAVER_BRIGHTNESS], CONF_SCREENSAVER_BRIGHTNESS
+        ),
+        CONF_BRIGHTNESS_SCHEDULE_ENABLED: brightness_schedule_enabled,
+        CONF_BRIGHTNESS_SCHEDULE_START: brightness_schedule_start,
+        CONF_BRIGHTNESS_SCHEDULE_END: brightness_schedule_end,
+        CONF_BRIGHTNESS_SCHEDULE_DASHBOARD: _percentage(
+            config[CONF_BRIGHTNESS_SCHEDULE_DASHBOARD],
+            CONF_BRIGHTNESS_SCHEDULE_DASHBOARD,
+        ),
+        CONF_BRIGHTNESS_SCHEDULE_SCREENSAVER: _percentage(
+            config[CONF_BRIGHTNESS_SCHEDULE_SCREENSAVER],
+            CONF_BRIGHTNESS_SCHEDULE_SCREENSAVER,
+        ),
     }

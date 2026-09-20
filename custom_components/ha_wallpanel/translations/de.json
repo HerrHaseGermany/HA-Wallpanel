@@ -12,6 +12,13 @@
           "cards": "Dashboard-Karten als Vollbild-Panels",
           "colors": "Vollbild-Farben",
           "panel_order": "Interne Panel-Reihenfolge",
+          "dashboard_brightness": "Dashboard-Helligkeit",
+          "screensaver_brightness": "Screensaver-Helligkeit",
+          "brightness_schedule_enabled": "Helligkeitszeitplan aktiviert",
+          "brightness_schedule_start": "Abgedunkelte Helligkeit ab",
+          "brightness_schedule_end": "Normale Helligkeit ab",
+          "brightness_schedule_dashboard": "Dashboard-Helligkeit im Zeitraum",
+          "brightness_schedule_screensaver": "Screensaver-Helligkeit im Zeitraum",
           "schedule_enabled": "Zeitplan aktiviert",
           "schedule_start": "Zeitplan beginnt",
           "schedule_end": "Normale Rotation ab",
@@ -28,6 +35,9 @@
           "views": "Enthält eingebaute und benutzerdefinierte Dashboards sowie deren einzelne Lovelace-Ansichten.",
           "cards": "Beim Hinzufügen öffnet sich der Home-Assistant-Kartenbrowser mit visueller Kartenauswahl und Karteneditor.",
           "colors": "Über Hinzufügen öffnet sich direkt der Colorpicker. Gespeicherte Farben werden mit Vorschau und Hexwert angezeigt.",
+          "dashboard_brightness": "100 % zeigt das Dashboard unverändert, 0 % blendet es vollständig auf Schwarz.",
+          "screensaver_brightness": "Wird getrennt vom Dashboard auf alle Screensaver-Panels angewendet.",
+          "brightness_schedule_enabled": "Optionaler täglicher Zeitraum mit eigenen Helligkeiten; er darf über Mitternacht gehen.",
           "schedule_enabled": "Der tägliche Zeitraum darf über Mitternacht gehen. Außerhalb läuft wieder die normale Panel-Rotation."
         }
       }
@@ -38,6 +48,7 @@
       "invalid_panels": "Wähle mindestens eine Ansicht, Karte oder Vollbild-Farbe.",
       "invalid_transition": "Die Überblendzeit darf nicht länger als die Anzeigezeit sein.",
       "invalid_schedule": "Prüfe Beginn, Ende und Betriebsart des Zeitplans.",
+      "invalid_brightness": "Die Helligkeit muss zwischen 0 und 100 % liegen und die Zeiten müssen unterschiedlich sein.",
       "invalid_value": "Mindestens ein Wert ist ungültig."
     },
     "abort": {
@@ -56,6 +67,13 @@
           "cards": "Dashboard-Karten als Vollbild-Panels",
           "colors": "Vollbild-Farben",
           "panel_order": "Interne Panel-Reihenfolge",
+          "dashboard_brightness": "Dashboard-Helligkeit",
+          "screensaver_brightness": "Screensaver-Helligkeit",
+          "brightness_schedule_enabled": "Helligkeitszeitplan aktiviert",
+          "brightness_schedule_start": "Abgedunkelte Helligkeit ab",
+          "brightness_schedule_end": "Normale Helligkeit ab",
+          "brightness_schedule_dashboard": "Dashboard-Helligkeit im Zeitraum",
+          "brightness_schedule_screensaver": "Screensaver-Helligkeit im Zeitraum",
           "schedule_enabled": "Zeitplan aktiviert",
           "schedule_start": "Zeitplan beginnt",
           "schedule_end": "Normale Rotation ab",
@@ -72,6 +90,9 @@
           "views": "Enthält eingebaute und benutzerdefinierte Dashboards sowie deren einzelne Lovelace-Ansichten.",
           "cards": "Beim Hinzufügen öffnet sich der Home-Assistant-Kartenbrowser mit visueller Kartenauswahl und Karteneditor.",
           "colors": "Über Hinzufügen öffnet sich direkt der Colorpicker. Gespeicherte Farben werden mit Vorschau und Hexwert angezeigt.",
+          "dashboard_brightness": "100 % zeigt das Dashboard unverändert, 0 % blendet es vollständig auf Schwarz.",
+          "screensaver_brightness": "Wird getrennt vom Dashboard auf alle Screensaver-Panels angewendet.",
+          "brightness_schedule_enabled": "Optionaler täglicher Zeitraum mit eigenen Helligkeiten; er darf über Mitternacht gehen.",
           "schedule_enabled": "Der tägliche Zeitraum darf über Mitternacht gehen. Außerhalb läuft wieder die normale Panel-Rotation."
         }
       }
@@ -82,6 +103,7 @@
       "invalid_panels": "Wähle mindestens eine Ansicht, Karte oder Vollbild-Farbe.",
       "invalid_transition": "Die Überblendzeit darf nicht länger als die Anzeigezeit sein.",
       "invalid_schedule": "Prüfe Beginn, Ende und Betriebsart des Zeitplans.",
+      "invalid_brightness": "Die Helligkeit muss zwischen 0 und 100 % liegen und die Zeiten müssen unterschiedlich sein.",
       "invalid_value": "Mindestens ein Wert ist ungültig."
     }
   }

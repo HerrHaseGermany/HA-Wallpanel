@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import sys
 import types
@@ -27,8 +28,20 @@ def load_module(name: str, filename: str):
     return module
 
 
-load_module("const", "const.py")
+constants = load_module("const", "const.py")
 config = load_module("config", "config.py")
+
+
+class VersionConsistencyTest(unittest.TestCase):
+    """Keep cache busting and release metadata on the same version."""
+
+    def test_versions_match(self) -> None:
+        package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+        manifest = json.loads(
+            (COMPONENT / "manifest.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(constants.VERSION, package["version"])
+        self.assertEqual(manifest["version"], package["version"])
 
 
 class NormalizeConfigTest(unittest.TestCase):
@@ -46,11 +59,46 @@ class NormalizeConfigTest(unittest.TestCase):
         )
         self.assertEqual(normalized["idle_time"], 10)
         self.assertFalse(normalized["show_progress"])
+        self.assertEqual(normalized["dashboard_brightness"], 100)
+        self.assertEqual(normalized["screensaver_brightness"], 100)
         self.assertNotIn("dashboard_paths", normalized)
+
+    def test_normalizes_brightness_and_daily_brightness_schedule(self) -> None:
+        normalized = config.normalize_config(
+            {
+                "views": ["/home"],
+                "dashboard_brightness": "85",
+                "screensaver_brightness": 60,
+                "brightness_schedule_enabled": True,
+                "brightness_schedule_start": "22:00:00",
+                "brightness_schedule_end": "06:00",
+                "brightness_schedule_dashboard": 30,
+                "brightness_schedule_screensaver": 5,
+            }
+        )
+        self.assertEqual(normalized["dashboard_brightness"], 85)
+        self.assertEqual(normalized["screensaver_brightness"], 60)
+        self.assertEqual(normalized["brightness_schedule_start"], "22:00")
+        self.assertEqual(normalized["brightness_schedule_end"], "06:00")
+        self.assertEqual(normalized["brightness_schedule_dashboard"], 30)
+        self.assertEqual(normalized["brightness_schedule_screensaver"], 5)
+
+    def test_rejects_invalid_brightness(self) -> None:
+        with self.assertRaises(config.ConfigValidationError) as context:
+            config.normalize_config(
+                {"views": ["/home"], "screensaver_brightness": 101}
+            )
+        self.assertEqual(context.exception.code, "invalid_brightness")
 
     def test_rejects_invalid_card(self) -> None:
         with self.assertRaisesRegex(config.ConfigValidationError, "Card 1"):
             config.normalize_config({"cards": [{"entity": "sun.sun"}]})
+
+    def test_rejects_invalid_card_scale(self) -> None:
+        with self.assertRaisesRegex(config.ConfigValidationError, "between 50 and 300"):
+            config.normalize_config(
+                {"cards": [{"card": {"type": "clock"}, "scale": 325}]}
+            )
 
     def test_rejects_long_transition(self) -> None:
         with self.assertRaises(config.ConfigValidationError) as context:
@@ -90,7 +138,7 @@ class NormalizeConfigTest(unittest.TestCase):
         normalized = config.normalize_config({"cards": [{"type": "clock"}]})
         self.assertEqual(
             normalized["cards"],
-            [{"name": "Karte 1", "card": {"type": "clock"}}],
+            [{"name": "Karte 1", "card": {"type": "clock"}, "scale": 100}],
         )
 
     def test_migrates_complete_panel_view_to_its_single_card(self) -> None:
@@ -120,6 +168,7 @@ class NormalizeConfigTest(unittest.TestCase):
                         "type": "custom:wall-clock-card",
                         "widgets": [{"type": "clock", "id": "clock"}],
                     },
+                    "scale": 100,
                 }
             ],
         )
