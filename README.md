@@ -43,17 +43,20 @@ Der Modus ist gerätebezogen: Nur Browser beziehungsweise Displays, deren URL `k
 
 Auch der Bildschirmschoner wird ausschließlich im Kioskmodus aktiviert. Normale Dashboard-Sitzungen ohne `kiosk` starten keinen Inaktivitäts-Timer.
 
-## Manuelle Testinstallation
+## Installation über HACS
 
-Das Repository bleibt bis zum Abschluss der Tests unveröffentlicht. Für die lokale Installation:
+Voraussetzung ist ein eingerichtetes [HACS](https://www.hacs.xyz/).
 
-1. Den Ordner `custom_components/ha_wallpanel` nach `/config/custom_components/ha_wallpanel` kopieren.
-2. Home Assistant Core neu starten.
-3. **Einstellungen → Geräte & Dienste → Integration hinzufügen** öffnen.
-4. Nach **HA-Wallpanel** suchen und die Integration hinzufügen.
-5. Den Browser beziehungsweise die Home-Assistant-App vollständig neu laden.
+1. **HACS** in Home Assistant öffnen und nach **HA-Wallpanel** suchen.
+2. **HA-Wallpanel** auswählen und herunterladen.
+3. Home Assistant neu starten.
+4. **Einstellungen → Geräte & Dienste → Integration hinzufügen** öffnen.
+5. Nach **HA-Wallpanel** suchen und die Integration hinzufügen.
+6. Den Browser beziehungsweise die Home-Assistant-App vollständig neu laden.
 
-Das Frontend-Modul wird von der Integration automatisch bereitgestellt und registriert.
+Das Frontend-Modul wird von der Integration automatisch bereitgestellt und registriert. Eine manuell angelegte JavaScript-Ressource ist nicht erforderlich.
+
+Die Integration liefert ihre eigenen Brand-Icons direkt im Ordner `custom_components/ha_wallpanel/brand` mit. Dadurch erscheint das HA-Wallpanel-Logo lokal unter **Geräte & Dienste**.
 
 ## Screensaver-Konfiguration
 
@@ -116,16 +119,6 @@ Beispiele für mögliche Kartenkonfigurationen:
 ## Architektur
 
 Das Python-Backend speichert und validiert die Einstellungen als Home-Assistant-Config-Entry. Ein automatisch geladenes Frontend-Modul empfängt die Konfiguration über Home Assistants authentifizierte WebSocket-Verbindung und verwaltet Bildschirmschoner und Kioskmodus global.
-
-## Wechsel von der frühen Testkarte
-
-Nach erfolgreichem Integrationstest können die alte Screensaver-Karte und ihre manuell eingetragene Ressource aus dem Dashboard entfernt werden. Für den abschließenden Test sollte nur HA-Wallpanel aktiv sein.
-
-## Installation über HACS
-
-Für die spätere Veröffentlichung wird das Repository als Typ **Integration** geführt. HACS installiert `custom_components/ha_wallpanel` automatisch. Das Repository muss vor einer öffentlichen HACS-Installation öffentlich sein.
-
-Ab Home Assistant 2026.3 liefert die Integration ihre eigenen Brand-Icons direkt im Ordner `custom_components/ha_wallpanel/brand` mit. Dadurch erscheint das HA-Wallpanel-Logo lokal unter **Geräte & Dienste**, ohne einen separaten Eintrag im Home-Assistant-Brands-Repository.
 
 ## Entwicklung und Tests
 

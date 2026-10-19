@@ -4,7 +4,7 @@ from __future__ import annotations
 
 DOMAIN = "ha_wallpanel"
 NAME = "HA-Wallpanel"
-VERSION = "0.7.21"
+VERSION = "0.7.22"
 
 CONF_ENABLED = "enabled"
 CONF_VIEWS = "views"

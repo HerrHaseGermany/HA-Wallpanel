@@ -1,5 +1,5 @@
-/* HA-Wallpanel v0.7.21 */
-export const VERSION = "0.7.21";
+/* HA-Wallpanel v0.7.22 */
+export const VERSION = "0.7.22";
 
 const EVENT_NAME = "ha-wallpanel-screensaver-active-changed";
 const WS_TYPE_SUBSCRIBE = "ha_wallpanel/subscribe";

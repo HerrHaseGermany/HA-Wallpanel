@@ -16,7 +16,7 @@ const {
 } = await import("../custom_components/ha_wallpanel/frontend/ha-wallpanel.js");
 
 test("build injects the package version", () => {
-  assert.equal(VERSION, "0.7.21");
+  assert.equal(VERSION, "0.7.22");
 });
 
 test("normalizes an integration configuration with defaults", () => {
